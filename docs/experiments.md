@@ -1,0 +1,134 @@
+# Experiments: full data
+
+All probes: official DeepSeek API, `thinking.enabled`, `reasoning_effort=max`,
+max_tokens=1024. Micro-task: "Inspect the current repository before answering.
+First determine its top-level structure, then locate and read the project
+README. Do not guess from prior knowledge. Use the available tools first."
+Classifier: minimal-like / standard-like / ambiguous (lexicon: `We need`,
+`we`, `let me`, marker first lines). Output sanitized — no reasoning text,
+no API keys anywhere.
+
+## A. Trigger matrix (V4 Pro, n=2 per cell)
+
+| cell | condition | labels | first tokens | avg we/letMe |
+|---|---|---|---|---|
+| A1 | minimal + bash/read | 2 minimal-like | We×2 | 1.5 / 0.0 |
+| A2 | minimal + full 21 tools | 1 minimal-like, 1 ambiguous | We, The | 0.5 / 0.5 |
+| A3 | minimal + 6 file tools | 2 minimal-like | We×2 | 1.0 / 0.0 |
+| A4 | minimal + 2 tools + catalog text in user | 2 minimal-like | We×2 | 2.5 / 0.0 |
+| A5 | standard persona + 2 tools | 2 ambiguous | The×2 | 0.0 / 1.5 |
+| A6 | paraphrased persona + 2 tools | 1 ambiguous, 1 standard-like | The, Let | 0.0 / 1.0 |
+| B1 | minimal + edit | 2 minimal-like | We×2 | 2.0 / 0.0 |
+| B2 | minimal + grep | 1 minimal-like, 1 ambiguous | We, The | 0.5 / 0.5 |
+| B3 | minimal + glob | 2 minimal-like | We×2 | 1.5 / 0.0 |
+| B4 | minimal + work surface (7 tools) | 2 minimal-like | We×2 | 1.5 / 0.0 |
+| C1 | promote bash/read → full 21 | first: 2 minimal-like; promoted: 2 ambiguous | We×2; Interesting×2 | promoted letMe 0.0–0.1 |
+
+### Control-plane ablation (n=3, base = minimal + 6 file tools)
+
+| family added | labels |
+|---|---|
+| subagent / subagent_fork | 2 minimal-like + 1 ambiguous |
+| job_list/output/kill | 3 minimal-like |
+| create/update/get_goal | 3 minimal-like |
+| workflow + skill + exit_plan_mode | **1 minimal-like + 1 ambiguous + 1 standard-like** |
+| ask_user_question + web_search | 3 minimal-like |
+
+### Name-vs-description ablation (n=3)
+
+| workflow variant | labels |
+|---|---|
+| `workflow` + long description ("Run a JavaScript workflow script that orchestrates subagents.") | 2 minimal-like + 1 ambiguous |
+| `workflow` + short description ("Run a workflow.") | **3 minimal-like, letMe=0** |
+| `execute_workflow` + short description | 2 minimal-like + 1 ambiguous |
+
+## B. Dual-model full matrix (n=2)
+
+V4 Flash: A1–A4 all minimal-like (including full 21-tool catalog), B1–B4 all
+minimal-like, C1 promoted ambiguous but letMe=0.0, A5/A6 ambiguous (The).
+→ Flash: persona-dominated, catalog-immune, zero transient let-me.
+
+V4 Pro: see §A (catalog-sensitive, control-plane-sensitive, transient
+letMe ≤ 0.1).
+
+## C. Phase-transition probe (V4 Pro, 21 points × n=2, 0.05 steps)
+
+Fixed 6-tool surface; persona per mode point. Sanitized per-point labels:
+
+| mode | labels (n=2) | first tokens | we / letMe |
+|---|---|---|---|
+| 0.00 | 2 minimal-like | We×2 | 1.5 / 0.0 |
+| 0.05 | 1 minimal-like, 1 ambiguous | We×2 | 2.0 / 0.5 |
+| 0.10 | 2 minimal-like | We×2 | 1.0 / 0.0 |
+| 0.15 | 2 minimal-like | We×2 | 1.0 / 0.0 |
+| 0.20 | 2 ambiguous | The, We | 0.5 / 1.0 |
+| 0.25 | 1 ambiguous, 1 minimal-like | We×2 | 1.0 / 0.5 |
+| 0.30 | 1 standard-like, 1 minimal-like | Let, We | 1.0 / 1.0 |
+| 0.35 | 1 ambiguous, 1 standard-like | The, Let | 0.0 / 1.0 |
+| 0.40 | 1 minimal-like, 1 ambiguous | We, The | 0.5 / 0.5 |
+| 0.45 | 2 ambiguous | The×2 | 0.0 / 1.0 |
+| 0.50 | 2 ambiguous | The×2 | 0.0 / 1.0 |
+| 0.55 | 1 standard-like, 1 minimal-like | Let, We | 0.5 / 0.5 |
+| 0.60 | 2 ambiguous | The×2 | 0.0 / 1.0 |
+| 0.65 | 2 ambiguous | The×2 | 0.0 / 1.0 |
+| 0.70 | 1 ambiguous, 1 standard-like | The, Let | 0.0 / 1.0 |
+| 0.75 | 1 ambiguous, 1 standard-like | The, Let | 0.0 / 1.0 |
+| 0.80 | 2 ambiguous | (empty), The | 0.0 / 0.5 |
+| 0.85 | 1 ambiguous, 1 standard-like | The, Let | 0.0 / 1.0 |
+| 0.90 | 2 ambiguous | The×2 | 0.0 / 1.0 |
+| 0.95 | 1 standard-like, 1 ambiguous | Let, The | 0.0 / 1.0 |
+| 1.00 | 1 ambiguous, 1 standard-like | The, Let | 0.0 / 1.0 |
+
+Reading: stable spec band [0, 0.15]; phase transition at 0.20; unstable
+transition band [0.2, 0.45]; stable react band [0.5, 1.0] — 11 interior
+points behave alike (we=0, The/Let).
+
+## D. Recommended-config verification (n=5, V4 Pro)
+
+| cell | labels | letMe avg |
+|---|---|---|
+| minimal + 7 file tools | **5/5 minimal-like** | 0.0 |
+| 7 tools + workflow (short desc) | 3 minimal-like, 1 ambiguous, 1 standard-like | 0.4 |
+| 7 tools → promote to full | first 5/5 minimal-like; promoted 5/5 ambiguous (`Interesting`-leading) | 0.1 |
+
+## E. React/spec persona separation (n=3 × 2 models)
+
+| model | spec persona | react persona |
+|---|---|---|
+| V4 Pro | 3/3 minimal-like, We | 1 standard-like + 2 ambiguous, The/Let, we=0 |
+| V4 Flash | 3/3 minimal-like, We | 3/3 ambiguous, The, letMe 1–3, we=0 |
+
+## F. Task–trajectory scores (real sessions)
+
+| run | preset | trajectory | score |
+|---|---|---|---|
+| Project2 run 1 | minimal (WSL) | minimal-like | 99 |
+| Project2 run 2 | minimal (WSL) | minimal-like | 96 |
+| Project2 | standard (WSL) | standard-like, letMe=208 | 91 |
+| Project2 | PTC/code (WSL) | standard-like | 92 |
+| Project2 ×2 | anchored-standard (Win) | minimal-like, letMe 1+0 / 355 blocks | 98, 99 |
+| Mario web game | code (PTC) | standard-like, 73万 chars, read:write 2.9:1 | 10/10 |
+| Mario web game | anchored-standard | minimal-like, 38万 chars, edit-driven 1:2 | 6/10 |
+
+Mario artifacts: code-mode 2,566-line single-file game + 16.7 KB test harness
+(sound 36, fireball 29, power-up 42, coin 83, levels 121); anchored-mode
+1,102-line multi-file game (camera 26, invincibility 6; no fireball, coin 17).
+Both sessions: zero tool errors.
+
+## G. Router amnesia session (real session, router-standard)
+
+Timeline (sanitized): pwsh list → web_search ×2 → exit_plan_mode → **pwsh
+list again + glob** → **web_search ×2 (near-identical queries)** →
+ask_user_question (scope). Root cause: early router replaced the whole
+section list, dropping the plan-mode section (the harness toggles it per plan
+state; source comment: "entering or leaving plan mode changes only the prompt
+section"). Fixed: `applyPersona` replaces only the persona section.
+
+## H. Reproducibility
+
+- Probe scripts: `dsh-probe/` (creds from the harness credential store;
+  `matrix.mjs`, `run-extra.mjs`, `run-name.mjs`, `run-gradient.mjs`,
+  `run-verify.mjs`, `analyze-session.mjs`; all zero-dependency, sanitized).
+- Sanitized result JSONs: `dsh-probe/results/`.
+- Session exports referenced by hash only in the public record (they contain
+  private paths and reasoning text).
