@@ -80,7 +80,7 @@ Copy-Item -Recurse .\preset $target
 Restart DSH, start a new session, pick **Router Standard (experimental)**.
 
 - `dev_router_status` — current mode, band, persona, core tools, override state
-- `dev_router_mode <spec|mixed|react|0-100|0.0-1.0|auto>` — explicit mode
+- `dev_router_mode <spec|weak|mixed|react|0-100|0.0-1.0|auto>` — explicit mode
   (numeric inputs quantize to the three bands)
 - `dev_mode_subagent <spec|react|balanced> <task>` — run one task in a
   DIFFERENT reasoning mode inside a fresh isolated context (its own system
@@ -88,6 +88,15 @@ Restart DSH, start a new session, pick **Router Standard (experimental)**.
   only reliable way to change modes mid-session: mid-session persona switches
   invalidate the whole prefix cache, tail personas are ineffective (P6), and
   the native subagent inherits this persona.
+
+**One preset, auto-matched per model.** There is no Pro/Flash split to
+configure: `personaFor(mode, modelId)` reads the session's model route and
+selects the measured optimum automatically — Pro → w6c (spec sentence +
+classify instruction, no anchors; 24/24 = 100% routing, P24), Flash → w7 +
+recall/converge/anti-runaway anchors (96% routing; 100% single-task
+completion, P23). The model is fixed at the first request (path commitment),
+so the persona is locked for the session; switching the GUI model starts a
+new session with the matching configuration.
 
 ## Tests
 
