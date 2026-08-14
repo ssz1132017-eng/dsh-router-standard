@@ -55,7 +55,8 @@ export function apply(ctx, config) {
     agents.set(session.id, agent)
 
     const mode = overrides.get(session.id) ?? sessionMode(session)
-    const persona = personaFor(mode)
+    const modelId = agent.options?.model
+    const persona = personaFor(mode, modelId)
 
     // The persona stays constant for the whole session (mode is fixed); only
     // the tool surface changes once, after the first durable tool/call.
@@ -94,22 +95,27 @@ export function apply(ctx, config) {
     mode: {
       type: 'string',
       required: true,
-      description: 'band name (spec / spec-lean / balanced / react-lean / react), a 0-100 number, a 0.0-1.0 number, or auto to clear the override',
+      description: 'band name (spec / weak / mixed / react), a 0-100 number, a 0.0-1.0 number, or auto to clear the override',
     },
+  }
+
+  function fmtMode(mode) {
+    return typeof mode === 'string' ? mode : mode.toFixed(2)
   }
 
   registerTool({
     name: 'dev_router_status',
-    description: 'Show this session\'s reasoning-mode routing: numeric mode, band, persona, first-turn core tools, test-suppression, and whether an override is active.',
+    description: 'Show this session\'s reasoning-mode routing: mode, band, persona, first-turn core tools, test-suppression, and whether an override is active.',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
     execute() {
       const session = currentSession()
       if (session === undefined) return 'no agent session'
       const mode = overrides.get(session.id) ?? sessionMode(session)
+      const modelId = currentAgent()?.options?.model
       return [
-        `mode=${mode.toFixed(2)} (band=${bandFor(mode)})`,
-        `persona=${personaFor(mode).replace(/\n/g, ' / ')}`,
+        `mode=${fmtMode(mode)} (band=${bandFor(mode)})`,
+        `persona=${personaFor(mode, modelId).replace(/\n/g, ' / ')}`,
         `core=[${coreFor(mode).join(', ')}]`,
         `testiness=${testinessFor(mode)}`,
         `override=${overrides.has(session.id) ? 'yes' : 'no'}`,
@@ -119,18 +125,18 @@ export function apply(ctx, config) {
 
   registerTool({
     name: 'dev_router_mode',
-    description: 'Set this session\'s reasoning mode on the react↔spec axis: spec (0) plan-first … balanced (0.5) … react (1) doer. Accepts band names, 0-100, or 0.0-1.0; use auto to return to task classification. The next request applies it.',
+    description: 'Set this session\'s reasoning mode: spec (plan-first) / weak (internal routing, model decides per task) / mixed (transition, trap) / react (doer). Accepts band names, 0-100, or 0.0-1.0; use auto to return to task classification. The next request applies it.',
     parameters: modeSpec,
     output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
     execute(args) {
       const parsed = parseMode(args.mode)
-      if (parsed === null) return `invalid mode "${args.mode}": use spec/spec-lean/balanced/react-lean/react, 0-100, 0.0-1.0, or auto`
+      if (parsed === null) return `invalid mode "${args.mode}": use spec/weak/mixed/react, 0-100, 0.0-1.0, or auto`
       const session = currentSession()
       if (session === undefined) return 'no agent session'
       if (parsed === 'auto') overrides.delete(session.id)
-      else overrides.set(session.id, clamp01(parsed))
+      else overrides.set(session.id, parsed === 'weak' ? 'weak' : clamp01(parsed))
       const current = overrides.get(session.id) ?? sessionMode(session)
-      return `mode=${current.toFixed(2)} (band=${bandFor(current)}) — next request applies`
+      return `mode=${fmtMode(current)} (band=${bandFor(current)}) — next request applies`
     },
   })
 
@@ -140,9 +146,9 @@ export function apply(ctx, config) {
   //    only working isolation is a fresh LLM call with its own system). ──
   registerTool({
     name: 'dev_mode_subagent',
-    description: 'Run one task in a DIFFERENT reasoning mode than this session, in a fresh isolated context (own system prompt). The current session trajectory is untouched. Mode: spec (plan-first) / react (doer) / balanced. Returns the subagent\'s answer text.',
+    description: 'Run one task in a DIFFERENT reasoning mode than this session, in a fresh isolated context (own system prompt). The current session trajectory is untouched. Mode: spec (plan-first) / weak (internal routing) / react (doer) / balanced. Returns the subagent\'s answer text.',
     parameters: {
-      mode: { type: 'string', required: true, description: 'spec / react / balanced (or 0-100)' },
+      mode: { type: 'string', required: true, description: 'spec / weak / react / balanced (or 0-100)' },
       task: { type: 'string', required: true, description: 'the task to hand to the mode-isolated subagent' },
       maxTokens: { type: 'number', description: 'output cap (default 1024)' },
     },
@@ -156,7 +162,7 @@ export function apply(ctx, config) {
       const { provider, model } = agent.options
       if (!provider || !model) return 'agent route missing provider/model'
 
-      const persona = personaFor(clamp01(parsed))
+      const persona = personaFor(parsed, model)
       const maxTokens = Number(args.maxTokens || 1024)
       let text = ''
       let reasoningChars = 0
@@ -176,7 +182,7 @@ export function apply(ctx, config) {
         return `subagent error: ${error && error.message ? error.message : String(error)}`
       }
       const head = text.slice(0, 3000)
-      return `[mode-subagent ${bandFor(clamp01(parsed))} | reasoning ${reasoningChars} chars]\n${head}${text.length > 3000 ? '\n…(truncated)' : ''}`
+      return `[mode-subagent ${bandFor(parsed)} | reasoning ${reasoningChars} chars]\n${head}${text.length > 3000 ? '\n…(truncated)' : ''}`
     },
   })
 
@@ -185,5 +191,10 @@ export function apply(ctx, config) {
     if (agent !== undefined && agent.session !== undefined) return agent.session
     const last = [...agents.values()].at(-1)
     return last?.session
+  }
+
+  function currentAgent() {
+    const session = currentSession()
+    return session === undefined ? undefined : [...agents.values()].find((a) => a.session === session)
   }
 }

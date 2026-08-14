@@ -8,17 +8,26 @@
  * numeric interface therefore maps onto three behavior bands; "continuous"
  * tuning is an illusion at the model layer.
  *
- *   mode 0    → pure spec  — plan-first, collective, read-first tools
- *   mode 0.5  → mixed      — spec sentence + light doer guidance (transition)
- *   mode 1    → pure react — doer, produce-verify-fix, test-suppressed
+ * FOURTH MODE — weak (internal routing): P8/P11 show a weak-persona domain
+ * where the model routes itself from the task (discrimination up to +5.0).
+ * The optimal weak persona is model-specific (P11, n=3):
+ *   - pro:   spec sentence + few-shot routing instruction (w6, +5.00)
+ *   - flash: neutral + explicit "classify then act" instruction (w7, +5.67)
+ *   - spec-sentence weak personas ANTI-route on flash (planGreen > 0).
  *
- * `mode` is stored as a number in [0, 1] (the numeric API stays), but
- * `personaFor`/`coreFor` quantize to the three behavior bands.
+ *   mode 0    → pure spec  — plan-first, collective, read-first tools
+ *   mode 0.3  → mixed      — transition band (trap; only explicit opt-in)
+ *   mode 1    → pure react — doer, produce-verify-fix, test-suppressed
+ *   mode W    → weak       — internal routing (model decides per task)
+ *
+ * `mode` is stored as a number in [0, 1] or the string 'weak'; band mapping
+ * quantizes to the four modes.
  */
 
 export const MODE_SPEC = 0
-export const MODE_MIXED = 0.5
+export const MODE_MIXED = 0.3
 export const MODE_REACT = 1
+export const MODE_WEAK = 'weak'
 
 const SPEC_PERSONA = 'You are a helpful software engineer assistant.'
 
@@ -34,19 +43,39 @@ const REACT_PERSONA =
   + 'harnesses, scaffolding, or ceremony the user did not ask for. '
   + 'Finish with a usable deliverable and a short summary.'
 
-/** Quantize a numeric mode to one of the three measured behavior bands. */
+/** Weak (internal-routing) personas — model-specific optimum (P11). */
+const WEAK_PRO =
+  'You are a helpful software engineer assistant.\n'
+  + 'Match your working style to the task type.\n'
+  + 'Example 1: "fix the broken login flow" → inspect first, plan, then edit carefully.\n'
+  + 'Example 2: "write a new CSV processing script" → write the code directly and verify it runs.\n'
+  + 'Follow the same rule for the actual request.'
+
+const WEAK_FLASH =
+  'You are a helpful assistant.\n'
+  + 'Before acting, decide the task type (build or fix) and adopt the matching '
+  + 'style: build → hands-on production; fix → inspect-and-plan.'
+
+/** True when the routed model id is a Flash-family model. */
+export function isFlashModel(modelId) {
+  return typeof modelId === 'string' && /flash/i.test(modelId)
+}
+
+/** Quantize a mode to one of the four measured behavior bands. */
 export function bandOf(mode) {
+  if (mode === 'weak') return 'weak'
   const m = clamp01(mode)
   if (m < 0.2) return 'spec' // measured stable spec region (0..0.15)
   if (m < 0.5) return 'transition' // measured unstable band — avoid
   return 'react' // measured stable react region (0.5..1 behave alike)
 }
 
-/** Persona for a mode: three-band quantization (see header for evidence). */
-export function personaFor(mode) {
+/** Persona for a mode; weak picks the model-specific internal-routing text. */
+export function personaFor(mode, modelId) {
   switch (bandOf(mode)) {
     case 'spec': return SPEC_PERSONA
     case 'transition': return MIXED_PERSONA
+    case 'weak': return isFlashModel(modelId) ? WEAK_FLASH : WEAK_PRO
     default: return REACT_PERSONA
   }
 }
@@ -67,8 +96,13 @@ export function bandFor(mode) {
 }
 
 /** Test-suppression strength for a mode (informational). */
+/** Test-suppression strength for a mode (informational). */
 export function testinessFor(mode) {
-  return bandOf(mode) === 'react' ? 'suppressed' : bandOf(mode) === 'spec' ? 'normal' : 'light'
+  switch (bandOf(mode)) {
+    case 'react': return 'suppressed'
+    case 'spec': return 'normal'
+    default: return 'light'
+  }
 }
 
 const REACT_RE = /(开发|创建|写一个|生成|从零|做一个|游戏|网页|网站|构建|新项目|搭建|实现|做出|上线|落地|脚本|工具|应用|build|create|develop|generate|implement|make a|new project)/gi
@@ -79,15 +113,16 @@ function countHits(regex, text) {
 }
 
 /**
- * Classify a task text into a mode value. The classifier only ever picks the
- * two stable bands (0 spec / 1 react); the measured transition band is a
- * trap and is never selected automatically. Ties and misses → spec.
+ * Classify a task text into a mode. Clear keyword evidence picks a stable
+ * band (1 react / 0 spec); AMBIGUOUS or unmatched text returns 'weak' —
+ * the internal-routing mode, where the model decides per task (P11 optimum).
  */
 export function classifyTask(text) {
   const react = countHits(REACT_RE, text)
   const spec = countHits(SPEC_RE, text)
   if (react > spec) return 1
-  return 0
+  if (spec > react) return 0
+  return 'weak'
 }
 
 /** Per-session mode derived from durable events (resume-safe). */
@@ -124,6 +159,7 @@ export function parseMode(token) {
   if (token === undefined || token === null) return null
   const t = String(token).trim().toLowerCase()
   if (t === 'auto') return 'auto'
+  if (t === 'weak' || t === 'router') return 'weak'
   if (t === 'spec' || t === 'spec-lean') return 0
   if (t === 'balanced' || t === 'mixed') return 0.3 // transition-band center
   if (t === 'react' || t === 'react-lean') return 1

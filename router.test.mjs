@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   classifyTask, personaFor, coreFor, bandFor, testinessFor, parseMode, applyPersona,
+  isFlashModel,
 } from './preset/router-core.mjs'
 
 test('react: greenfield/build tasks map to react band', () => {
@@ -21,9 +22,30 @@ test('mixed task lands in react band (net react keywords)', () => {
   assert.equal(bandFor(classifyTask('帮我开发一个小游戏然后修复里面的 bug')), 'react')
 })
 
-test('unmatched defaults to conservative spec', () => {
-  assert.equal(classifyTask('今天天气怎么样'), 0)
-  assert.equal(bandFor(classifyTask('今天天气怎么样')), 'spec')
+test('unmatched defaults to weak (internal routing)', () => {
+  assert.equal(classifyTask('今天天气怎么样'), 'weak')
+  assert.equal(bandFor('weak'), 'weak')
+})
+
+test('ties default to weak (internal routing)', () => {
+  assert.equal(classifyTask('帮我开发一个小游戏然后修复里面的 bug'), 1) // net react wins
+  assert.equal(classifyTask('开发并修复'), 'weak') // tie → weak
+})
+
+test('weak persona is model-specific (P11)', () => {
+  const pro = personaFor('weak', 'deepseek-v4-pro')
+  const flash = personaFor('weak', 'deepseek-v4-flash')
+  assert.ok(pro.includes('Match your working style to the task type'))
+  assert.ok(flash.includes('decide the task type'))
+  assert.notEqual(pro, flash)
+  assert.equal(personaFor('weak', 'deepseek-v4-flash'), personaFor('weak', 'deepseek-v4-flash'))
+  assert.equal(isFlashModel('deepseek-v4-flash'), true)
+  assert.equal(isFlashModel('deepseek-v4-pro'), false)
+})
+
+test('parseMode accepts weak', () => {
+  assert.equal(parseMode('weak'), 'weak')
+  assert.equal(parseMode('router'), 'weak')
 })
 
 test('persona quantizes to three measured bands', () => {
