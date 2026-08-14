@@ -82,14 +82,16 @@ export function apply(ctx, config) {
     }
   })
 
-  // ── near-field routing guidance for weak mode (P14/P16/P17) ─────────────
+  // ── near-field routing guidance for weak mode (P14/P16/P17/P19) ─────────
   // Every REAL user message in a weak-mode session gets one fixed guidance
   // message appended to the inbox right after it (near field, cache-neutral).
-  // The model then re-classifies the task itself and adopts the matching
-  // style — measured zero-decay (P14 c) and genuine reasoning-level routing
-  // (P17). Fixed text keeps the system prefix stable (cache ~92% hit, P18).
+  // Rounds 3+ switch to the BOOST variant — an explicit "new task, fresh
+  // classification, do not follow the previous style" — measured 23/24 (96%)
+  // routing with an anti-decay second half (12/12) on flash (P19).
   const GUIDE_WEAK =
     '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first.'
+  const GUIDE_BOOST =
+    '\nRouter: this is a NEW task, different from the previous ones. Classify it fresh (build or fix) and adopt the matching style — build: direct production; fix: inspect-first. Do not follow the previous task\'s style.'
 
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'user/message') return
@@ -102,12 +104,15 @@ export function apply(ctx, config) {
     if (bandOf(mode) !== 'weak') return // strong modes need no guidance
     const text = extractText(data)
     if (!text.trim()) return
+    // round number = real user messages so far (including this one)
+    const userCount = session.events.filter((e) => e.type === 'user/message' && e.data?.source?.kind === 'user').length
+    const guide = userCount >= 3 ? GUIDE_BOOST : GUIDE_WEAK
     try {
       target.inbox.append('next-step', {
         id: `router-guide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'user',
         source: { kind: 'plugin', plugin: 'router-bootstrap' },
-        content: [{ type: 'text', text: GUIDE_WEAK }],
+        content: [{ type: 'text', text: guide }],
       })
     } catch { /* duplicate/ordering races: skip */ }
   })

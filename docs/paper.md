@@ -297,6 +297,24 @@ stable bands on a complex task; (P4) dual-attractor structure transfers to
 other frontier models with documented scaffold training; (P10) weak-router
 scores at least as well as the best stable band on both task families.
 
+**Deep-then-converge: the MoE intuition, measured (P10, Flash, 8192 budget).**
+A single-turn scan (5 personas × n=3) finds the "thunder thinking, then
+converge" interval: **deep-react** — the react persona plus "think deeply
+first, then produce" — doubles reasoning depth vs plain react (9.7k → 18.4k
+chars) at 100% convergence (finish = tool_calls, never budget-truncated).
+Pure deep-thinking instructions are a trap: "think deeply" alone reaches the
+8192-token budget (32k chars) with 0% convergence. Under max reasoning the
+model spends its entire budget unless the persona anchors "then commit and
+act" — the budget starvation behind the "thunder thinking feels bad"
+experience. This is the empirical form of the MoE intuition: the internal
+explore-then-route-then-commit structure is triggerable by a persona
+interval, and the binding instruction is the critical ingredient. The Flash
+domain scan (P8-F) also shows no competition trap on Flash (mixed +3.00,
+react-weak +4.67) — Flash's weaker attractors let task content through,
+making weak-persona routing 1.5–2× stronger than on Pro. The Pro
+deep-converge scan is running (max-reasoning Pro is slow) and will be added
+on completion.
+
 ## 7. Conclusion
 
 Frontier reasoning models can host multiple specialist behavior policies
