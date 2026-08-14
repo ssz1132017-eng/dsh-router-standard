@@ -32,11 +32,14 @@ test('ties default to weak (internal routing)', () => {
   assert.equal(classifyTask('开发并修复'), 'weak') // tie → weak
 })
 
-test('weak persona is model-specific (P11)', () => {
+test('weak persona is model-specific (P11/P24)', () => {
   const pro = personaFor('weak', 'deepseek-v4-pro')
   const flash = personaFor('weak', 'deepseek-v4-flash')
-  assert.ok(pro.includes('Match your working style to the task type'))
-  assert.ok(flash.includes('decide the task type'))
+  assert.ok(pro.includes('decide the task type (build or fix)'))
+  assert.ok(pro.includes('You are a helpful software engineer assistant.'))
+  assert.ok(!pro.includes('review what you have already done')) // P24: anchors hurt Pro
+  assert.ok(flash.includes('decide the task type (build or fix)'))
+  assert.ok(flash.includes('review what you have already done')) // anchors help flash
   assert.notEqual(pro, flash)
   assert.equal(personaFor('weak', 'deepseek-v4-flash'), personaFor('weak', 'deepseek-v4-flash'))
   assert.equal(isFlashModel('deepseek-v4-flash'), true)

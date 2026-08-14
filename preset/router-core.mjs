@@ -43,14 +43,17 @@ const REACT_PERSONA =
   + 'harnesses, scaffolding, or ceremony the user did not ask for. '
   + 'Finish with a usable deliverable and a short summary.'
 
-/** Weak (internal-routing) personas — model-specific optimum (P11). */
+/** Weak (internal-routing) personas — model-specific optimum (P11/P24).
+ *  pro:   spec sentence + classify instruction (w6c, +4.67, P24) — the
+ *         few-shot variants and the recall/converge anchors HURT Pro
+ *         (P24: suite-full 83% < naked 87.5% vs +guide 100%)
+ *  flash: neutral + classify + recall/converge/anti-runaway anchors
+ *         (w7, +5.67, P11; anchors lift single-task completion to 100%, P23)
+ */
 const WEAK_PRO =
   'You are a helpful software engineer assistant.\n'
-  + 'Match your working style to the task type.\n'
-  + 'Example 1: "fix the broken login flow" → inspect first, plan, then edit carefully.\n'
-  + 'Example 2: "write a new CSV processing script" → write the code directly and verify it runs.\n'
-  + 'Follow the same rule for the actual request.\n'
-  + 'Before acting, briefly review what you have already done in this session and continue from where you left off; do not repeat completed steps. When you have gathered enough information, stop exploring and produce the deliverable. Do not run environment checks (echo, whoami, uname, node --version, date) or exhaustive grep/glob scans.'
+  + 'Before acting, decide the task type (build or fix) and adopt the matching '
+  + 'style: build → hands-on production; fix → inspect-and-plan.'
 
 const WEAK_FLASH =
   'You are a helpful assistant.\n'
