@@ -82,16 +82,14 @@ export function apply(ctx, config) {
     }
   })
 
-  // ── near-field routing guidance for weak mode (P14/P16/P17/P19) ─────────
-  // Every REAL user message in a weak-mode session gets one fixed guidance
+  // ── near-field routing guidance for weak mode (P14/P16/P17/P19/P20) ─────
+  // Every REAL user message in a weak-mode session gets ONE fixed guidance
   // message appended to the inbox right after it (near field, cache-neutral).
-  // Rounds 3+ switch to the BOOST variant — an explicit "new task, fresh
-  // classification, do not follow the previous style" — measured 23/24 (96%)
-  // routing with an anti-decay second half (12/12) on flash (P19).
+  // v12 uses the deep-guide text — route 23/24 (96%), convergence 24/24
+  // (100%), cache 94.2%, anti-decay second half (P20, flash, n=3). The depth
+  // anchor MUST stay in the near field (deep-persona collapsed to 67%, P20).
   const GUIDE_WEAK =
-    '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first.'
-  const GUIDE_BOOST =
-    '\nRouter: this is a NEW task, different from the previous ones. Classify it fresh (build or fix) and adopt the matching style — build: direct production; fix: inspect-first. Do not follow the previous task\'s style.'
+    '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first. Think deeply first, then commit and act.'
 
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'user/message') return
@@ -104,15 +102,12 @@ export function apply(ctx, config) {
     if (bandOf(mode) !== 'weak') return // strong modes need no guidance
     const text = extractText(data)
     if (!text.trim()) return
-    // round number = real user messages so far (including this one)
-    const userCount = session.events.filter((e) => e.type === 'user/message' && e.data?.source?.kind === 'user').length
-    const guide = userCount >= 3 ? GUIDE_BOOST : GUIDE_WEAK
     try {
       target.inbox.append('next-step', {
         id: `router-guide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'user',
         source: { kind: 'plugin', plugin: 'router-bootstrap' },
-        content: [{ type: 'text', text: guide }],
+        content: [{ type: 'text', text: GUIDE_WEAK }],
       })
     } catch { /* duplicate/ordering races: skip */ }
   })
