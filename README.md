@@ -93,10 +93,22 @@ Restart DSH, start a new session, pick **Router Standard (experimental)**.
 configure: `personaFor(mode, modelId)` reads the session's model route and
 selects the measured optimum automatically — Pro → w6c (spec sentence +
 classify instruction, no anchors; 24/24 = 100% routing, P24), Flash → w7 +
-recall/converge/anti-runaway anchors (96% routing; 100% single-task
-completion, P23). The model is fixed at the first request (path commitment),
-so the persona is locked for the session; switching the GUI model starts a
-new session with the matching configuration.
+recall/anti-runaway anchors (96% routing; 100% single-task completion, P23).
+The model is fixed at the first request (path commitment), so the persona is
+locked for the session; switching the GUI model starts a new session with the
+matching configuration.
+
+**Depth-adaptive guidance (v20, thinking efficiency).** Per-message guidance
+is dispatched by task complexity (`isComplexTask`: length or architecture
+keywords):
+- **simple tasks** → fast-convergence guide (P30: 1 step, zero waste);
+- **complex tasks** → decision-closure deep guide: "Think deeply about the
+  architecture, edge cases, and integration points. Do not spend reasoning
+  on the environment or tooling. Produce when your information is complete.
+  End each reasoning block with a decision or an information need." —
+  P30: depth +12% AND faster convergence (8.0 vs 8.3 steps), 3/3 completion.
+- Rumination (environment suspicion / re-confirmation) is suppressed by the
+  anti-runaway anchor: measured 0.0-0.3% of reasoning tokens.
 
 ## Tests
 
