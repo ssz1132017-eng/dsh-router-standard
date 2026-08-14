@@ -59,7 +59,16 @@ const WEAK_FLASH =
   'You are a helpful assistant.\n'
   + 'Before acting, decide the task type (build or fix) and adopt the matching '
   + 'style: build → hands-on production; fix → inspect-and-plan.\n'
-  + 'Before acting, briefly review what you have already done in this session and continue from where you left off; do not repeat completed steps. When you have gathered enough information, stop exploring and produce the deliverable. Do not run environment checks (echo, whoami, uname, node --version, date) or exhaustive grep/glob scans.'
+  + 'Before acting, briefly review what you have already done in this session and continue from where you left off; do not repeat completed steps. Do not run environment checks (echo, whoami, uname, node --version, date) or exhaustive grep/glob scans.'
+
+/** Complexity heuristic: long or architecturally-worded tasks are COMPLEX.
+ *  Simple tasks get fast-convergence guidance; complex tasks get deep
+ *  exploration guidance (depth-adaptive, v19). */
+const COMPLEX_RE = /(重构|架构|全面|详细|设计|系统|优化|分析|survey|overview|architecture|refactor|comprehensive|detailed|design|system|optimize|analyze)/i
+
+export function isComplexTask(text) {
+  return typeof text === 'string' && (text.length > 120 || COMPLEX_RE.test(text))
+}
 
 /** True when the routed model id is a Flash-family model. */
 export function isFlashModel(modelId) {

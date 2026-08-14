@@ -21,6 +21,7 @@
 
 import {
   applyPersona, bandFor, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
+  isComplexTask,
 } from './router-core.mjs'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -85,11 +86,15 @@ export function apply(ctx, config) {
   // ── near-field routing guidance for weak mode (P14/P16/P17/P19/P20) ─────
   // Every REAL user message in a weak-mode session gets ONE fixed guidance
   // message appended to the inbox right after it (near field, cache-neutral).
-  // v12 uses the deep-guide text — route 23/24 (96%), convergence 24/24
-  // (100%), cache 94.2%, anti-decay second half (P20, flash, n=3). The depth
-  // anchor MUST stay in the near field (deep-persona collapsed to 67%, P20).
+  // v19: depth-adaptive — SIMPLE tasks get the fast-convergence guide;
+  // COMPLEX tasks get the deep-exploration guide (depth-first, information-
+  // driven stop signal). The persona carries no hard converge anchor
+  // (P27: information-driven convergence beats step-driven; user feedback:
+  // flash was over-confident / too shallow on complex tasks).
   const GUIDE_WEAK =
     '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first. Think deeply first, then commit and act.'
+  const GUIDE_DEEP =
+    '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first. Think deeply and thoroughly; explore widely before producing. Produce when your information is complete.'
 
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'user/message') return
@@ -102,12 +107,13 @@ export function apply(ctx, config) {
     if (bandOf(mode) !== 'weak') return // strong modes need no guidance
     const text = extractText(data)
     if (!text.trim()) return
+    const guide = isComplexTask(text) ? GUIDE_DEEP : GUIDE_WEAK
     try {
       target.inbox.append('next-step', {
         id: `router-guide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'user',
         source: { kind: 'plugin', plugin: 'router-bootstrap' },
-        content: [{ type: 'text', text: GUIDE_WEAK }],
+        content: [{ type: 'text', text: guide }],
       })
     } catch { /* duplicate/ordering races: skip */ }
   })
