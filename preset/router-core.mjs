@@ -50,13 +50,13 @@ const WEAK_PRO =
   + 'Example 1: "fix the broken login flow" → inspect first, plan, then edit carefully.\n'
   + 'Example 2: "write a new CSV processing script" → write the code directly and verify it runs.\n'
   + 'Follow the same rule for the actual request.\n'
-  + 'Before acting, briefly review what you have already done in this session and continue from where you left off; do not repeat completed steps. When you have gathered enough information, stop exploring and produce the deliverable.'
+  + 'Before acting, briefly review what you have already done in this session and continue from where you left off; do not repeat completed steps. When you have gathered enough information, stop exploring and produce the deliverable. Do not run environment checks (echo, whoami, uname, node --version, date) or exhaustive grep/glob scans.'
 
 const WEAK_FLASH =
   'You are a helpful assistant.\n'
   + 'Before acting, decide the task type (build or fix) and adopt the matching '
   + 'style: build → hands-on production; fix → inspect-and-plan.\n'
-  + 'Before acting, briefly review what you have already done in this session and continue from where you left off; do not repeat completed steps. When you have gathered enough information, stop exploring and produce the deliverable.'
+  + 'Before acting, briefly review what you have already done in this session and continue from where you left off; do not repeat completed steps. When you have gathered enough information, stop exploring and produce the deliverable. Do not run environment checks (echo, whoami, uname, node --version, date) or exhaustive grep/glob scans.'
 
 /** True when the routed model id is a Flash-family model. */
 export function isFlashModel(modelId) {
