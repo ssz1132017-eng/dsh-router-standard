@@ -266,15 +266,36 @@ API for compatibility but document the three bands.
 
 **Limitations.** n is small (2–5 per probe cell; two task families for
 scores); the classifier is keyword-based (a learned router is future work);
-the transition band's score penalty (P2) is predicted but not yet measured;
-V4 Flash and V4 Pro differ in basin structure, so results do not transfer
-blindly; the trajectory lexicon is a fingerprint, not an identity proof.
+the transition band's score penalty (P2) is not yet measured on a complex
+task — simple tasks saturate (spec/mixed/react all 5/5); P9 (complex-task
+score comparison) is partially run and needs its harness fixed (module
+resolution + connectivity) before conclusions; V4 Flash and V4 Pro differ in
+basin structure, so results do not transfer blindly; the trajectory lexicon
+is a fingerprint, not an identity proof.
+
+**Self-routing: impossibility and its narrow exception.** P3 (persona fixed,
+task swapped mid-session → trajectory unchanged, n=2), P5 (three router
+personas, all absorbed by the doer attractor, n=2) and P8 (domain-overlap
+scan, 8 personas × 2 tasks × n=3) locate the only internal-routing window: a
+**weak persona** (neutral system, or neutral + few-shot routing instruction)
+where task content leans the trajectory in the correct direction
+(discrimination +3.3 / +2.3). The lean is partial — maintenance scores stay
+near zero, never reaching the spec attractor's +1. The mixed competition band
+is discrimination-free (0.0). Spec-side personas anti-route: greenfield tasks
+become MORE plan-collective (planScore +8), the measured mechanism behind the
+6/10 anchored Mario score. Self-routing therefore exists only as a
+weak-domain lean, not a reliable switch — external routing remains required,
+and a "weak-router" (weak persona + few-shot instruction + external
+classifier fallback) is the candidate practical optimum. Mid-session mode
+changes are not viable: persona switches invalidate the whole prefix cache,
+tail personas are ineffective (P6: tail-spec produces doer trajectories), and
+the native subagent inherits the session persona — the working mechanism is
+mode isolation (fresh context, own system prompt; `dev_mode_subagent`).
 
 **Predictions open for testing.** (P2) mixed-band scores are lower than both
-stable bands on any task; (P3) a session fixed to the spec persona will *not*
-switch trajectories when the user injects a greenfield task mid-session
-(self-routing is impossible); (P4) dual-attractor structure transfers to
-other frontier models with documented scaffold training.
+stable bands on a complex task; (P4) dual-attractor structure transfers to
+other frontier models with documented scaffold training; (P10) weak-router
+scores at least as well as the best stable band on both task families.
 
 ## 7. Conclusion
 

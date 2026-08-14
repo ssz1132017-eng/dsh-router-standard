@@ -56,10 +56,14 @@ Evidence across projects (see `docs/paper.md` and `docs/experiments.md`):
 - Intermediate personas are **out-of-distribution** (training-distribution
   gap), which is the measured unstable band.
 
-The model cannot self-route: there is no reward signal for switching modes mid
-session, and the behavior phase transition means it commits on the first
-request. **Mode selection must come from outside** — a human (the "streamer"),
-a heuristic classifier, or a learned router. This preset is the automated
+The model cannot self-route: P3 (same persona, task swap → trajectory
+unchanged), P5 (router personas → doer attractor absorbs the instruction) and
+P8 (domain-overlap scan) show the only internal-routing window is a WEAK
+persona + few-shot routing instruction (lean, not flip; discrimination
++2.3..+3.3). There is no reward signal for switching modes mid session, and
+the behavior phase transition means the model commits on the first request.
+**Mode selection must come from outside** — a human (the "streamer"), a
+heuristic classifier, or a learned router. This preset is the automated
 version of that external routing.
 
 ## Usage
@@ -78,6 +82,12 @@ Restart DSH, start a new session, pick **Router Standard (experimental)**.
 - `dev_router_status` — current mode, band, persona, core tools, override state
 - `dev_router_mode <spec|mixed|react|0-100|0.0-1.0|auto>` — explicit mode
   (numeric inputs quantize to the three bands)
+- `dev_mode_subagent <spec|react|balanced> <task>` — run one task in a
+  DIFFERENT reasoning mode inside a fresh isolated context (its own system
+  prompt), leaving the current trajectory untouched. Mode isolation is the
+  only reliable way to change modes mid-session: mid-session persona switches
+  invalidate the whole prefix cache, tail personas are ineffective (P6), and
+  the native subagent inherits this persona.
 
 ## Tests
 
