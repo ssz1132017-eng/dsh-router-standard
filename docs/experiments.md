@@ -132,3 +132,50 @@ section"). Fixed: `applyPersona` replaces only the persona section.
 - Sanitized result JSONs: `dsh-probe/results/`.
 - Session exports referenced by hash only in the public record (they contain
   private paths and reasoning text).
+
+## I. P3/P5/P6/P8 — self-routing impossibility and its narrow exception
+
+**P3 (no self-routing, same persona, task swap, n=2)**: persona fixed to spec,
+inject a greenfield task after a maintenance task → still `We` (we=5, we=13);
+persona fixed to react, inject a maintenance task → still `The`/`Let` (we=0).
+Trajectory is fully persona-locked; task content has zero effect.
+
+**P5 (router personas, 3 variants × 2 tasks × n=2)**: instruct, few-shot, and
+explicit TASK_TYPE classification personas all produce doer trajectories on
+both tasks — the router instruction itself lands in the react attractor.
+No task discrimination under any router persona (v1/v2/v3 discrimination ≈ 0).
+
+**P6 (tail persona, n=2)**: persona text at the END of the user message is
+ineffective and reversed: tail-spec (neutral system + spec text in user) →
+2/2 `Let` (doer) on a maintenance task; tail-react behaves like react. Identity
+conditioning is system-position-specific.
+
+**P8 (domain-overlap scan, 8 personas × 2 tasks × n=3)**: task discrimination
+(planScore = we − letMe) per persona:
+
+| persona | planScore maint | planScore green | discrimination |
+|---|---|---|---|
+| neutral | −0.67 | −4.00 | **+3.33** (internal routing, correct direction) |
+| spec | +1.00 | +8.00 | −7.00 (anti-routing: green becomes MORE plan) |
+| spec-mixed | +1.00 | +7.67 | −6.67 |
+| mixed (competition) | −1.00 | −1.00 | 0.00 (no routing, pure trap) |
+| react-weak | −1.00 | −1.00 | 0.00 |
+| react | −1.00 | −2.33 | +1.33 |
+| router-v1 (instruct) | +0.33 | −1.00 | +1.33 |
+| router-v2 (few-shot) | 0.00 | −2.33 | **+2.33** (explicit routing works, partial) |
+
+Findings: an internal-routing domain EXISTS, but in the weak-persona region
+(neutral, router-v2 few-shot), not in the mixed competition band (which is
+discrimination-free). Spec-side personas anti-route (greenfield tasks become
+more plan-collective — the measured mechanism behind the 6/10 Mario score).
+Routing in the weak domain is a *lean*, not a flip (maint stays near 0, never
+reaches spec's +1).
+
+**P2 revisited (score level, fixed assertion)**: gcd+csvSum JS task — spec 5/5,
+mixed 5/5, react 5/5 & 4/5. Simple tasks saturate: trajectory differences do
+not surface in scores until the task is complex enough (Mario: 10 vs 6).
+
+Design consequence: the only self-routing window is a **weak persona + few-shot
+routing instruction + external classifier fallback** (router-v2 style). This
+"weak-router" configuration is the candidate for a practical optimum; score
+validation on a complex task is the open measurement.

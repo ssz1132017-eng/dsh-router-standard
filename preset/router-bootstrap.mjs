@@ -26,8 +26,8 @@ import {
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'router-bootstrap'
 
-/** Prompt assembly and the tools registry must exist before registering. */
-export const inject = ['systemPrompt', 'tools']
+/** Prompt assembly, the tools registry, and the LLM route must exist. */
+export const inject = ['systemPrompt', 'tools', 'llm']
 
 /** Minimal spec → JSON Schema compiler (subset of defineTool's work). */
 function toJsonSchema(spec) {
@@ -131,6 +131,52 @@ export function apply(ctx, config) {
       else overrides.set(session.id, clamp01(parsed))
       const current = overrides.get(session.id) ?? sessionMode(session)
       return `mode=${current.toFixed(2)} (band=${bandFor(current)}) — next request applies`
+    },
+  })
+
+  // ── mode-isolated subagent: run a task in a DIFFERENT reasoning mode,
+  //    without touching this session's trajectory (P6 showed tail persona
+  //    is ineffective; DSH's native subagent inherits this persona, so the
+  //    only working isolation is a fresh LLM call with its own system). ──
+  registerTool({
+    name: 'dev_mode_subagent',
+    description: 'Run one task in a DIFFERENT reasoning mode than this session, in a fresh isolated context (own system prompt). The current session trajectory is untouched. Mode: spec (plan-first) / react (doer) / balanced. Returns the subagent\'s answer text.',
+    parameters: {
+      mode: { type: 'string', required: true, description: 'spec / react / balanced (or 0-100)' },
+      task: { type: 'string', required: true, description: 'the task to hand to the mode-isolated subagent' },
+      maxTokens: { type: 'number', description: 'output cap (default 1024)' },
+    },
+    output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
+    async execute(args) {
+      const parsed = parseMode(args.mode)
+      if (parsed === null || parsed === 'auto') return `invalid mode "${args.mode}"`
+      const session = currentSession()
+      const agent = session === undefined ? undefined : [...agents.values()].find((a) => a.session === session)
+      if (agent === undefined || agent.options === undefined) return 'no agent route available'
+      const { provider, model } = agent.options
+      if (!provider || !model) return 'agent route missing provider/model'
+
+      const persona = personaFor(clamp01(parsed))
+      const maxTokens = Number(args.maxTokens || 1024)
+      let text = ''
+      let reasoningChars = 0
+      try {
+        const stream = ctx.llm.stream({
+          provider,
+          model,
+          system: persona,
+          messages: [{ role: 'user', content: [{ type: 'text', text: String(args.task) }] }],
+          maxTokens,
+        })
+        for await (const chunk of stream) {
+          if (chunk.type === 'text-delta') text += chunk.text
+          else if (chunk.type === 'reasoning-delta') reasoningChars += chunk.text.length
+        }
+      } catch (error) {
+        return `subagent error: ${error && error.message ? error.message : String(error)}`
+      }
+      const head = text.slice(0, 3000)
+      return `[mode-subagent ${bandFor(clamp01(parsed))} | reasoning ${reasoningChars} chars]\n${head}${text.length > 3000 ? '\n…(truncated)' : ''}`
     },
   })
 
