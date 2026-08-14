@@ -203,3 +203,50 @@ on a greenfield task, at parity with spec and react (P10 partially
 supported); (d) react converged fastest (median 2 rounds vs 3–4), consistent
 with the doer attractor's produce-verify loop on build tasks. A harder task
 (multi-file, open spec) is needed to amplify score differences.
+
+## K. P8-Flash — domain scan on V4 Flash (n=3)
+
+| persona | planScore maint | planScore green | discrimination |
+|---|---|---|---|
+| neutral | −0.33 | −2.33 | +2.00 |
+| spec | +1.67 | +5.67 | −4.00 |
+| spec-mixed | +1.33 | +6.00 | −4.67 |
+| mixed (competition) | −0.33 | −3.33 | **+3.00** |
+| react-weak | 0.00 | −4.67 | **+4.67** |
+| react | −1.00 | −2.67 | +1.67 |
+| router-v1 | −1.00 | −3.67 | +2.67 |
+| router-v2 | −0.33 | −4.67 | **+4.33** |
+
+Key difference vs Pro: **Flash has NO competition trap** — the mixed band
+(+3.00) and react-weak (+4.67) are the STRONGEST routing domains on Flash,
+whereas on Pro they measure 0.00. Flash's weaker attractors let task content
+penetrate the persona: weak-persona routing is roughly 1.5–2× stronger on
+Flash. Spec-side anti-routing exists on both (greenfield tasks become more
+plan-collective), but weaker on Flash (−4/−4.67 vs −7/−6.67).
+
+## L. P10 — deep-then-converge scan (V4 Flash, n=3, maxTokens 8192)
+
+| persona | mean reasoning chars | convergence | finish | deep-score |
+|---|---|---|---|---|
+| spec(0) | 22,168 | 0.67 | tool_calls ×2, length ×1 | 14,779 |
+| react(1) | 9,724 | 1.00 | tool_calls ×3 | 9,724 |
+| deep1 (think deeply) | **32,514** | **0.00** | length ×3 | **0** |
+| deep2 (two-phase) | 31,889 | **0.00** | length ×3 | 0 |
+| **deep-react** (react + deep-then-produce) | **18,389** | **1.00** | tool_calls ×3 | **18,389** |
+
+Findings:
+- The "thunder thinking, then converge" region EXISTS as a persona:
+  **deep-react** — the react persona plus a "think deeply first, then
+  produce" sentence — doubles reasoning depth vs plain react (9.7k → 18.4k
+  chars) while keeping 100% convergence (finish = tool_calls, never
+  budget-truncated).
+- **Pure deep-thinking instructions are a trap**: deep1/deep2 reach 32k chars
+  (the 8192-token budget) with 0% convergence — "think deeply" alone makes the
+  model think to the budget ceiling without acting. Deep thinking MUST be
+  paired with an explicit convergence instruction.
+- Under max reasoning, the model spends reasoning until the budget is
+  exhausted unless the persona anchors "then commit and act" — the budget
+  starvation behind "thunder thinking feels bad".
+- This is the empirical form of the MoE intuition: the internal
+  explore-then-route-then-commit structure is triggerable by the persona
+  interval; the binding instruction is the critical ingredient.

@@ -82,6 +82,36 @@ export function apply(ctx, config) {
     }
   })
 
+  // ── near-field routing guidance for weak mode (P14/P16/P17) ─────────────
+  // Every REAL user message in a weak-mode session gets one fixed guidance
+  // message appended to the inbox right after it (near field, cache-neutral).
+  // The model then re-classifies the task itself and adopts the matching
+  // style — measured zero-decay (P14 c) and genuine reasoning-level routing
+  // (P17). Fixed text keeps the system prefix stable (cache ~92% hit, P18).
+  const GUIDE_WEAK =
+    '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first.'
+
+  ctx.on('session/event', (session, event) => {
+    if (event.type !== 'user/message') return
+    const data = event.data ?? {}
+    if (data.source?.kind !== 'user') return // only real user messages
+    const agent = ctx.get('agent')
+    const target = agent !== undefined && agent.session === session ? agent : [...agents.values()].find((a) => a.session === session)
+    if (target === undefined || target.inbox === undefined) return
+    const mode = overrides.get(session.id) ?? sessionMode(session)
+    if (bandOf(mode) !== 'weak') return // strong modes need no guidance
+    const text = extractText(data)
+    if (!text.trim()) return
+    try {
+      target.inbox.append('next-step', {
+        id: `router-guide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role: 'user',
+        source: { kind: 'plugin', plugin: 'router-bootstrap' },
+        content: [{ type: 'text', text: GUIDE_WEAK }],
+      })
+    } catch { /* duplicate/ordering races: skip */ }
+  })
+
   // ── router visibility & tuning (agent self-optimization) ────────────────
   const registerTool = (tool) => {
     ctx.effect(() => ctx.tools.register({
