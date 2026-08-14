@@ -53,7 +53,8 @@ const REACT_PERSONA =
 const WEAK_PRO =
   'You are a helpful software engineer assistant.\n'
   + 'Before acting, decide the task type (build or fix) and adopt the matching '
-  + 'style: build → hands-on production; fix → inspect-and-plan.'
+  + 'style: build → hands-on production; fix → inspect-and-plan.\n'
+  + 'Plan briefly, then produce — do not over-plan.'
 
 const WEAK_FLASH =
   'You are a helpful assistant.\n'
