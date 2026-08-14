@@ -179,3 +179,27 @@ Design consequence: the only self-routing window is a **weak persona + few-shot
 routing instruction + external classifier fallback** (router-v2 style). This
 "weak-router" configuration is the candidate for a practical optimum; score
 validation on a complex task is the open measurement.
+
+## J. P9 — complex-task score validation (shopping cart, 10 asserts, n=3)
+
+Task: 8-feature cart module (merge/remove/updateQty/discount/coupon/snapshot/
+clear/boundary errors), 10 asserts, up to 5 repair rounds. Conditions:
+spec(0) / mixed(0.3) / react(1) / weak-router (neutral + few-shot routing
+instruction).
+
+| condition | scores | mean | rounds to pass (median) |
+|---|---|---|---|
+| spec(0.0) | 10, 10, 10 | 10.0 | 3 |
+| mixed(0.3) | 10, 10, **0** | 6.7 | 3 (failed run: export shape wrong, never fixed) |
+| react(1.0) | 10, 10, 10 | 10.0 | 2 |
+| weak-router | 10, 10, 10 | 10.0 | 4 |
+
+Findings: (a) the task is still too easy for trajectory differences to
+dominate — three conditions saturate at 10/10; (b) the mixed band shows its
+instability at score level: 1 of 3 runs failed outright (5 rounds, wrong
+export shape never repaired despite explicit feedback), consistent with the
+0.0-discrimination trajectory evidence; (c) weak-router is safe: full score
+on a greenfield task, at parity with spec and react (P10 partially
+supported); (d) react converged fastest (median 2 rounds vs 3–4), consistent
+with the doer attractor's produce-verify loop on build tasks. A harder task
+(multi-file, open spec) is needed to amplify score differences.

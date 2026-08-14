@@ -6,7 +6,7 @@
  *
  * Usage: node eval-cart.mjs --run [--n 3] [--rounds 4] [--model X]
  */
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -105,6 +105,8 @@ async function sendWithRetry(opts, tries = 3) {
     try {
       return await sendTurn(opts)
     } catch (error) {
+      const msg = String(error?.message || error)
+      if (!/timeout|fetch failed|ECONN|UND_ERR|socket|network/i.test(msg)) throw error
       if (i === tries - 1) throw error
       await new Promise((r) => setTimeout(r, 4000 * (i + 1)))
     }
@@ -121,6 +123,7 @@ for (const cond of conds) {
     let best = 0
     let detail = ''
     let roundsUsed = 0
+    const wrotePaths = []
     for (let round = 0; round < maxRounds; round++) {
       const turn = await sendWithRetry({ apiKey: creds.apiKey, baseUrl: creds.baseUrl, maxTokens, messages, model: creds.model, tools })
       roundsUsed = round + 1
@@ -134,36 +137,44 @@ for (const cond of conds) {
           try { args = JSON.parse(call.function.arguments || '{}') } catch { /* ignore */ }
           const path = String(args.file_path || 'cart.js').split(/[\\/]/).pop()
           writeFileSync(join(dir, path), String(args.content ?? ''), 'utf8')
+          wrotePaths.push(path)
           feedback.push({ role: 'tool', tool_call_id: call.id, content: `wrote ${path} (${(args.content ?? '').length} chars)` })
         } else {
           feedback.push({ role: 'tool', tool_call_id: call.id, content: 'probe: not executed locally' })
         }
       }
       // Fallback: the model may have put the code in the reply text instead of
-      // calling write — extract the first fenced code block and save it.
+      // calling write — extract a fenced block, else save the whole reply.
       if (!wroteAny) {
         const raw = turn.message.content ?? ''
         const contentText = Array.isArray(raw)
           ? raw.map((b) => (typeof b === 'string' ? b : (b.text ?? ''))).join('')
           : String(raw)
-        const m = contentText.match(/```(?:js|javascript)?\s*([\s\S]*?)```/)
-        if (m && m[1].trim()) {
-          writeFileSync(join(dir, 'cart.js'), m[1].trim(), 'utf8')
-          feedback.push({ role: 'user', content: `probe: extracted code block from your reply (${m[1].trim().length} chars) -> cart.js; prefer the write tool next time` })
+        const fenced = contentText.match(/```(?:js|javascript)?\s*([\s\S]*?)```/)
+        const code = fenced ? fenced[1].trim() : contentText.trim()
+        if (code.length > 50) {
+          writeFileSync(join(dir, 'cart.js'), code, 'utf8')
+          wrotePaths.push(`cart.js (from reply, fenced=${!!fenced})`)
+          feedback.push({ role: 'user', content: `probe: saved your reply as cart.js (${code.length} chars, fenced=${!!fenced}); prefer the write tool next time` })
         } else {
-          feedback.push({ role: 'user', content: `probe: no write call and no fenced code block found in your reply (content length ${contentText.length})` })
+          feedback.push({ role: 'user', content: `probe: no code found in your reply (content length ${contentText.length}); use the write tool to deliver cart.js` })
         }
       }
       const { passed, total, detail: d } = runAsserts(dir)
       best = Math.max(best, passed)
       detail = d
+      // Diagnostic: if the module is missing because the model wrote the wrong
+      // filename, say so explicitly instead of echoing the raw stack trace.
+      if (!existsSync(join(dir, 'cart.js'))) {
+        feedback.push({ role: 'user', content: `probe: cart.js is MISSING. Files written this round: [${wrotePaths.join(', ') || 'none'}]. The test imports './cart.js' — you MUST create exactly cart.js (module.exports or ESM export createCart).` })
+      }
       messages = [...messages, turn.message, ...feedback, { role: 'user', content: `Local assertion run (round ${round + 1}):\n${detail}` }]
       if (passed === total) break
       await new Promise((r) => setTimeout(r, 300))
     }
     const score = `${best}/10`
     scores.push(best)
-    console.log(JSON.stringify({ cond: cond.label, run: i, score, roundsUsed, detail: detail.slice(0, 180) }))
+    console.log(JSON.stringify({ cond: cond.label, run: i, score, roundsUsed, wrote: wrotePaths.length ? wrotePaths.join(',') : 'none', detail: detail.slice(0, 180) }))
     results.push({ cond: cond.label, run: i, score: best, roundsUsed })
     rmSync(dir, { recursive: true, force: true })
   }
