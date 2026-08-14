@@ -250,3 +250,26 @@ Findings:
 - This is the empirical form of the MoE intuition: the internal
   explore-then-route-then-commit structure is triggerable by the persona
   interval; the binding instruction is the critical ingredient.
+
+## L. Related-task chain (P21, flash, n=3, 8 rounds) — guidance FAILS
+
+Same-file evolution chain (write cart.js → fix total → extend coupon → fix
+coupon → extend snapshot → fix remove → extend import → fix clear).
+Behavior-truth verdicts: fix = explore-before-produce; extend = produce used.
+
+| variant | route | read continuity | fix rounds |
+|---|---|---|---|
+| a-baseline (no guidance) | **15/24 (63%)** | 21% | 8/12 (67%) |
+| b-boost | 15/24 (63%) | 17% | 6/12 (50%) |
+| c-continuity ("read existing code first") | 12/24 (50%) | 13% | 6/12 (50%) |
+| d-deep (v12 text) | **11/24 (46%)** | 13% | 6/12 (50%) |
+
+Findings: (a) the 96% of v12/deep-guide holds ONLY for unrelated-task
+alternation; related chains collapse to 46-63% — baseline is the best
+variant, guidance is NEGATIVE in related tasks (it steers the model toward
+classification instead of reading the existing code); (b) read continuity is
+13-21% everywhere — models rewrite instead of read-modify; caveat: probe
+tool results are information-void fixtures (a real `read` returns content),
+which may inflate the skip-read rate, but the guidance-negative effect
+(deep 46% < baseline 63%) is real. Related-task chains are an open problem;
+real-session feedback is the authoritative test.
