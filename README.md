@@ -79,16 +79,23 @@ version of that external routing.
 
 ## Usage
 
-Install as a DSH agent preset:
+**Two presets** (v0.2.0): install one or both under `~/.dsh/.agent-presets/`:
 
 ```powershell
+# 标准路由预设（RL 接口还原，默认推荐）
 $target = Join-Path $env:USERPROFILE '.dsh\.agent-presets\router-standard'
-Copy-Item -Recurse .\preset $target
+Copy-Item -Recurse .\preset\router-standard $target
+
+# spec 路由预设（深度思考优先）
+$target = Join-Path $env:USERPROFILE '.dsh\.agent-presets\router-spec'
+Copy-Item -Recurse .\preset\router-spec $target
 # NOTE: installed copies must keep unique module filenames
 # (the loader caches ESM modules by URL; do not overwrite in place)
 ```
 
-Restart DSH, start a new session, pick **Router Standard (experimental)**.
+Restart DSH, start a new session, pick **Router Standard (experimental)**
+(RL-interface, think-act loops) or **Router Spec (experimental)**
+(deep-think-first, the long first-turn chain is the point).
 
 - `dev_router_status` — current mode, band, persona, core tools, override state
 - `dev_router_mode <spec|weak|mixed|react|0-100|0.0-1.0|auto>` — explicit mode
