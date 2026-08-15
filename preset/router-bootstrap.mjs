@@ -47,6 +47,7 @@ function toJsonSchema(spec) {
 export function apply(ctx, config) {
   const overrides = new Map() // session id -> explicit mode (number 0..1)
   const agents = new Map() // session id -> Agent (live handle, in-process only)
+  const firstUserText = new Map() // session id -> first REAL user message text (issue #3 fix)
 
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
@@ -55,13 +56,36 @@ export function apply(ctx, config) {
     const session = agent.session
     agents.set(session.id, agent)
 
-    const mode = overrides.get(session.id) ?? sessionMode(session)
+    // issue #3 fix: the first assembly happens before the first user/message
+    // event lands in session.events, so sessionMode() saw an empty transcript
+    // and injected the WEAK band on the path-committing first request. Use the
+    // live text captured by the session/event listener (or inbox pending) so
+    // the first request carries the REAL classification.
+    const mode = overrides.get(session.id) ?? firstUserText.get(session.id) ?? sessionMode(session)
     const modelId = agent.options?.model
-    const persona = personaFor(mode, modelId)
 
-    // The persona stays constant for the whole session (mode is fixed); only
-    // the tool surface changes once, after the first durable tool/call.
-    const sections = applyPersona(assembled.sections, persona)
+    // v0.2.0 interface restoration: the first request carries ONLY the RL
+    // training sentence as system prompt (measured in a real DSH session:
+    // 25 steps / 24 tool calls / 19KB artifact vs 101K reasoning chars and
+    // zero action with the full polluted system). The band classification
+    // still selects the near-field guidance for later turns.
+    const persona = 'You are a helpful software engineer assistant.'
+
+    // The persona stays constant for the whole session; only the tool
+    // surface changes once, after the first durable tool/call.
+    //
+    // v0.2.0 interface restoration: the first request carries ONLY the router
+    // persona — the identity, web-orientation, tool-guidance and rule sections
+    // are interface pollution (measured: 101K reasoning chars / zero action in
+    // a real session with the full 6.5K-char system, vs 25-step / 24-tool-call
+    // working session with a 46-char system on the official API and DSH).
+    // This mirrors the minimal preset's `complete: true` semantics. The
+    // plan-mode section is kept when present so plan boundaries do not reset
+    // the model's focus.
+    const planSection = (assembled.sections || []).find((s) => /plan/i.test(s.name))
+    const sections = planSection
+      ? [planSection, { name: 'router-persona', text: persona, order: 0 }]
+      : [{ name: 'router-persona', text: persona, order: 0 }]
 
     if (session.events.some((event) => event.type === 'tool/call')) {
       return { ...assembled, sections, contexts: [] } // promoted: full catalog
@@ -100,12 +124,15 @@ export function apply(ctx, config) {
     if (event.type !== 'user/message') return
     const data = event.data ?? {}
     if (data.source?.kind !== 'user') return // only real user messages
+    const text = extractText(data)
+    if (!firstUserText.has(session.id) && text.trim()) {
+      firstUserText.set(session.id, text.trim()) // issue #3: capture BEFORE assembly
+    }
     const agent = ctx.get('agent')
     const target = agent !== undefined && agent.session === session ? agent : [...agents.values()].find((a) => a.session === session)
     if (target === undefined || target.inbox === undefined) return
-    const mode = overrides.get(session.id) ?? sessionMode(session)
+    const mode = overrides.get(session.id) ?? firstUserText.get(session.id) ?? sessionMode(session)
     if (bandOf(mode) !== 'weak') return // strong modes need no guidance
-    const text = extractText(data)
     if (!text.trim()) return
     const guide = isComplexTask(text) ? GUIDE_DEEP : GUIDE_WEAK
     try {

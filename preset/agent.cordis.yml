@@ -80,6 +80,18 @@
   config:
     sampleOverCapGlobResults: false
 
+# ── RL-shape editor (v0.2.0 interface restoration) ─────────────────────────
+#
+# The RL training interface uses persistent bash + str_replace_editor (the
+# minimal preset's two-tool surface). The WEAK (Flash) band's first-turn core
+# tool set is shell + this editor — the RL shape — because the measured
+# interface-restoration result (2026-08-15, official API, n=2) is 100% tool
+# calls at 18–29K reasoning chars vs ~25% action / 73–101K under the
+# read/write/edit surface. The editor is only visible in the first turn of a
+# weak-band session; after the first durable tool/call the full catalog opens.
+- id: tool-str-replace-editor
+  name: '@deepseek-ai/dsh-tool-str-replace-editor'
+
 # ── background jobs ────────────────────────────────────────────────────────
 
 # Only the model-facing controls. The task REGISTRY stays on the host plane:
