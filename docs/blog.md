@@ -146,7 +146,7 @@ Router Standard（一个预设，零配置）
 └─ AI 自优化工具：dev_router_status / dev_router_mode / dev_mode_subagent
 ```
 
-配套：注入器引导铁律 10 条（[dsh-super-injector](https://github.com/dsh-external/dsh-super-injector) v0.3.3）、三步安装套装（[dsh-routing-suite](https://github.com/yjh051108/dsh-routing-suite)）。
+配套：注入器引导铁律 10 条（[dsh-super-injector](https://github.com/yjh051108/dsh-super-injector) v0.3.1）、三步安装套装（[dsh-routing-suite](https://github.com/yjh051108/dsh-routing-suite)）。
 
 ## 六、教训与设计原则
 
