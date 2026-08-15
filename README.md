@@ -1,5 +1,12 @@
 # dsh-router-standard
 
+> ## ⚠️ 勘误与道歉（2026-08-16）
+>
+> **论文不撤回**，但其中的**理论解释部分（双吸引子假设 A1–A4 及强归因）已标注作废**。
+> 实测数据、探针方法、工程实现继续有效。修订后的叙事：两条思维链之间存在**断层/断裂带**，
+> 本预设的实际作用是把**断层当作路由层**使用，实现 "Let me" / "We need" 自路由。
+> 详细说明见 [docs/statement.md](docs/statement.md)（勘误声明）与 [docs/apology.md](docs/apology.md)（道歉函）。
+
 **Task-aware reasoning-mode router for DeepSeek Harness.** One preset, two
 **routing modes** (v0.2.0 naming), plus the measured three-band axis behind them:
 
