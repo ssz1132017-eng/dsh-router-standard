@@ -3,12 +3,12 @@
 **Task-aware reasoning-mode router for DeepSeek Harness.** One preset, two
 **routing modes** (v0.2.0 naming), plus the measured three-band axis behind them:
 
-| routing mode | first request | behavior |
+| routing mode | first request | thinking shape |
 |---|---|---|
-| **standard（标准路由模式，默认）** | RL 接口还原：只有 RL 训练句（`You are a helpful software engineer assistant.`）+ shell/str_replace_editor | 想一段、做一段（实测：25 步 / 24 工具调用 / 产出文件） |
-| **spec（spec 路由模式）** | 分类 persona（spec/react/weak）+ 完整 prompt sections | 深度思考优先，首轮超长思维链（101K 推理 0 行动是其特征，不是缺陷） |
+| **standard（标准路由预设）** | RL 接口还原：只有 RL 训练句（`You are a helpful software engineer assistant.`）+ shell/str_replace_editor | **没有雷霆大思考**：想一段做一段（实测：25 步 / 24 工具调用 / 产出文件；单步推理 ~3.9K，思考总量与其他模式相当，但分散在行动之间） |
+| **spec（spec 路由预设）** | 分类 persona（spec/react/weak）+ 完整 prompt sections | **雷霆大思考**：首轮超长思维链（101K 推理 0 行动是其特征，不是缺陷） |
 
-> 选择：`agent.cordis.yml` 的 `router-bootstrap.config.routerMode`（standard/spec）。
+> 选择：安装两个预设之一（Router Standard / Router Spec，见 Usage）。
 > `dev_router_status` 显示当前路由模式。
 
 > This is a research artifact. It encodes a measured property of DeepSeek V4
