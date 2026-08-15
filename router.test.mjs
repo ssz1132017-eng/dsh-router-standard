@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   classifyTask, personaFor, coreFor, bandFor, testinessFor, parseMode, applyPersona,
-  isFlashModel,
+  isFlashModel, extractText, sessionMode,
 } from './preset/router-core.mjs'
 
 test('react: greenfield/build tasks map to react band', () => {
@@ -30,6 +30,21 @@ test('unmatched defaults to weak (internal routing)', () => {
 test('ties default to weak (internal routing)', () => {
   assert.equal(classifyTask('帮我开发一个小游戏然后修复里面的 bug'), 1) // net react wins
   assert.equal(classifyTask('开发并修复'), 'weak') // tie → weak
+})
+
+test('issue #1: plugin-generated nested user/message shape still classifies', () => {
+  // 注入器 startIngest 的旧 seed 形状（data.message 嵌套）：提取必须解包，
+  // 否则构建/修复任务误入 weak。
+  const nested = { message: { kind: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '把目录里的内容内化成 DSH 插件并构建注入' }] } }
+  assert.match(extractText(nested), /内化成/)
+  assert.equal(bandFor(classifyTask(extractText(nested))), 'react')
+  // 标准形状不受影响
+  const flat = { kind: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '修复这个仓库里的 bug' }] }
+  assert.equal(extractText(flat), '修复这个仓库里的 bug')
+  assert.equal(bandFor(classifyTask(extractText(flat))), 'spec')
+  // sessionMode 用首条 user/message（嵌套形状）
+  const session = { events: [{ type: 'user/message', data: nested }] }
+  assert.equal(sessionMode(session), 1)
 })
 
 test('weak persona is model-specific (P11/P24)', () => {
