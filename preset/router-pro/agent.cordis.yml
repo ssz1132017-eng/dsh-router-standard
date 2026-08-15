@@ -1,17 +1,17 @@
-# The `router-standard` experimental preset: task-aware reasoning-mode routing.
+# The `router-pro` experimental preset: V4 Pro measured-optimal routing.
 #
-# One preset, two reasoning modes, chosen from the session's first user
+# Task-aware interface selection, chosen from the session's first user
 # message before the first model request:
 #
-#   spec  (Specification-first, plan-collective)  — maintenance/fix tasks.
-#         persona: minimal RL-aligned sentence; core: read/edit/glob/grep.
-#   react (Reactive-execution, doer)              — greenfield/build tasks.
-#         persona: hands-on doer, no ceremony;    core: read/write/edit.
+#   spec (maintenance/fix) — RL interface: one-sentence persona +
+#         shell/str_replace_editor, context stripped (anchored 98/99).
+#   react (build/greenfield) — doer interface: hands-on persona +
+#         write-first core (Mario code-mode 10/10).
+#   weak (ambiguous) — router-v2 few-shot + RL surface (discrimination +2.6).
 #
-# After the first durable tool/call the full Standard catalog is exposed and
-# the router stops touching anything. Mode derives from durable session
-# events, so resume/reload keeps it. `dev_router_status` / `dev_router_override`
-# expose the routing to the agent itself for self-optimization.
+# The transition band [0.03, 0.455] is NEVER selected (E2: 9/12 points
+# anti-route, −2.0..−10.6). After the first durable tool/call the full
+# Standard catalog is exposed and the router stops touching anything.
 #
 # This file is an AGENT-PLANE composition. The roster mounts it ONCE under a
 # standing scope; every session naming it joins by scope parentage, so the
@@ -48,16 +48,18 @@
 # injects the matching persona + first-turn core tool set; after the first
 # durable tool/call, exposes the full Standard catalog.
 #
-# routerMode (v0.2.0):
-#   standard (default) — RL 接口还原: first request carries ONLY the RL training
-#     sentence + shell/str_replace_editor; model works in think-act feedback
-#     loops (measured: 25 steps / 24 tool calls in a real session).
-#   spec — 深度思考优先: classified persona + full prompt sections; the long
-#     first-turn reasoning chain (101K chars) is a feature, not a defect.
+# routerMode (v0.3.0):
+#   pro (default) — V4 Pro 测量最优: task-aware interface selection —
+#     maintenance → RL interface (one-sentence + shell/editor, context
+#     stripped), build → doer interface (hands-on + write-first),
+#     ambiguous → router-v2 few-shot; transition band never selected.
+#   standard — RL 接口还原: first request carries ONLY the RL training
+#     sentence + shell/str_replace_editor (measured: 25 steps / 24 tools).
+#   spec — 深度思考优先: classified persona + full prompt sections.
 - id: router-bootstrap
-  name: ./router-bootstrap-v1.mjs
+  name: ./router-bootstrap.mjs
   config:
-    routerMode: standard
+    routerMode: pro
 
 # ── shell ───────────────────────────────────────────────────────────────────
 
@@ -288,4 +290,3 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
-

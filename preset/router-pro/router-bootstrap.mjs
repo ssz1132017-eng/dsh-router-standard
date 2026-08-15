@@ -20,8 +20,8 @@
  */
 
 import {
-  applyPersona, bandFor, bandOf, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
-  isComplexTask,
+  applyPersona, bandFor, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
+  isComplexTask, isFlashModel,
 } from './router-core.mjs'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -54,7 +54,7 @@ export function apply(ctx, config) {
   //   模型"想一段、做一段"（实测 25 步 / 24 工具调用 / 产出文件）。
   // spec（旧）: 深度思考优先——分类 persona（w7/REACT/SPEC）+ 保留全部 sections，
   //   模型首轮长思维链（101K 推理 0 行动是其特征，不是缺陷）。
-  const routerMode = config.routerMode === 'spec' ? 'spec' : 'standard'
+  const routerMode = config.routerMode === 'pro' ? 'pro' : config.routerMode === 'spec' ? 'spec' : 'standard'
   const RL_PERSONA = 'You are a helpful software engineer assistant.'
 
   /** spec 路由模式的首轮工具面（旧行为；weak 也走 default 面）。 */
@@ -95,6 +95,23 @@ export function apply(ctx, config) {
         ? [planSection, { name: 'router-persona', text: persona, order: 0 }]
         : [{ name: 'router-persona', text: persona, order: 0 }]
       core = new Set(['str_replace_editor']) // RL shape: shell + editor
+    } else if (routerMode === 'pro') {
+      // pro（V4 Pro 测量最优）: 任务感知接口——分类任务后按带注入接口。
+      //   spec（维护）→ RL 接口：一句话 persona + shell/editor，剥离上下文
+      //     （Project2 anchored 98/99 证据）；
+      //   react（构建）→ doer 接口：hands-on persona + write-first 工具面
+      //     （Mario code-mode 10/10 证据）；
+      //   weak（无证据）→ router-v2 few-shot + RL 面（判别 +2.6, n=10）。
+      //   竞争带 [0.03, 0.455] 永不选（E2: 反路由 −2.0..−10.6）。
+      persona = personaFor(mode, modelId)
+      if (bandFor(mode) === 'react') {
+        sections = applyPersona(assembled.sections, persona) // doer: keep all sections
+      } else {
+        sections = planSection
+          ? [planSection, { name: 'router-persona', text: persona, order: 0 }]
+          : [{ name: 'router-persona', text: persona, order: 0 }]
+      }
+      core = new Set(coreFor(mode))
     } else {
       persona = personaFor(mode, modelId)
       sections = applyPersona(assembled.sections, persona) // keep all other sections
@@ -120,18 +137,29 @@ export function apply(ctx, config) {
     }
   })
 
-  // ── near-field routing guidance for weak mode (P14/P16/P17/P19/P20) ─────
-  // Every REAL user message in a weak-mode session gets ONE fixed guidance
-  // message appended to the inbox right after it (near field, cache-neutral).
-  // v19: depth-adaptive — SIMPLE tasks get the fast-convergence guide;
-  // COMPLEX tasks get the deep-exploration guide (depth-first, information-
-  // driven stop signal). The persona carries no hard converge anchor
-  // (P27: information-driven convergence beats step-driven; user feedback:
-  // flash was over-confident / too shallow on complex tasks).
+  // ── near-field routing guidance (P14/P16/P17/P19/P20/P30) ───────────────
+  // Every REAL user message gets ONE fixed guidance appended to the inbox
+  // right after it (near field, cache-neutral).
+  // v0.3.0 pro: the DECISION-CLOSURE loop applies to ALL bands — P30 measured
+  // +12% depth AND faster convergence on Pro ("End each reasoning block with
+  // a decision or an information need"); without it the RL/doer interface
+  // leaves Pro thinking unbounded (user-reported "思考过度").
   const GUIDE_WEAK =
-    '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first. Think deeply first, then commit and act.'
+    '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first. Think deeply first, then commit and act. End each reasoning block with a decision or an information need.'
   const GUIDE_DEEP =
     '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first. Think deeply about the architecture, edge cases, and integration points. Do not spend reasoning on the environment or tooling. Produce when your information is complete. End each reasoning block with a decision or an information need.'
+  // spec (RL interface) / react (doer) band guides — no classify instruction
+  // (already routed); the decision-closure loop is the pro-mode "pacemaker".
+  // MODEL SPLIT (flash ≠ pro): closure is Pro-only (P30: +12% depth Pro,
+  // neutral Flash); Flash gets the P20 deep-persona commit tail instead.
+  const GUIDE_SPEC =
+    '\nThink deeply about the task. End each reasoning block with a decision or an information need. Then act on it.'
+  const GUIDE_REACT =
+    '\nWork directly. End each reasoning block with a decision or an information need. Then act on it.'
+  const GUIDE_FLASH_SPEC =
+    '\nThink deeply first, then commit and act.'
+  const GUIDE_FLASH_REACT =
+    '\nWork directly, then verify. Keep the loop tight.'
 
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'user/message') return
@@ -145,9 +173,13 @@ export function apply(ctx, config) {
     const target = agent !== undefined && agent.session === session ? agent : [...agents.values()].find((a) => a.session === session)
     if (target === undefined || target.inbox === undefined) return
     const mode = overrides.get(session.id) ?? firstUserText.get(session.id) ?? sessionMode(session)
-    if (bandOf(mode) !== 'weak') return // strong modes need no guidance
+    if (routerMode !== 'pro' && bandOf(mode) !== 'weak') return // legacy: strong modes need no guidance
     if (!text.trim()) return
-    const guide = isComplexTask(text) ? GUIDE_DEEP : GUIDE_WEAK
+    let guide
+    const isFlash = isFlashModel(modelId)
+    if (bandOf(mode) === 'weak') guide = isComplexTask(text) ? GUIDE_DEEP : GUIDE_WEAK
+    else if (bandOf(mode) === 'spec') guide = isFlash ? GUIDE_FLASH_SPEC : GUIDE_SPEC
+    else guide = isFlash ? GUIDE_FLASH_REACT : GUIDE_REACT
     try {
       target.inbox.append('next-step', {
         id: `router-guide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
