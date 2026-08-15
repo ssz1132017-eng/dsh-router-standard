@@ -49,6 +49,22 @@ export function apply(ctx, config) {
   const agents = new Map() // session id -> Agent (live handle, in-process only)
   const firstUserText = new Map() // session id -> first REAL user message text (issue #3 fix)
 
+  // ── 路由模式（v0.2.0 命名，用户定义）───────────────────────────────────────
+  // standard（默认，新）: RL 接口还原——首轮只有 RL 训练句 + shell/str_replace_editor，
+  //   模型"想一段、做一段"（实测 25 步 / 24 工具调用 / 产出文件）。
+  // spec（旧）: 深度思考优先——分类 persona（w7/REACT/SPEC）+ 保留全部 sections，
+  //   模型首轮长思维链（101K 推理 0 行动是其特征，不是缺陷）。
+  const routerMode = config.routerMode === 'spec' ? 'spec' : 'standard'
+  const RL_PERSONA = 'You are a helpful software engineer assistant.'
+
+  /** spec 路由模式的首轮工具面（旧行为；weak 也走 default 面）。 */
+  function legacyCore(mode) {
+    switch (bandOf(mode)) {
+      case 'spec': return ['read', 'edit', 'glob', 'grep']
+      default: return ['read', 'write', 'edit']
+    }
+  }
+
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
     const agent = context.agent
@@ -64,34 +80,31 @@ export function apply(ctx, config) {
     const mode = overrides.get(session.id) ?? firstUserText.get(session.id) ?? sessionMode(session)
     const modelId = agent.options?.model
 
-    // v0.2.0 interface restoration: the first request carries ONLY the RL
-    // training sentence as system prompt (measured in a real DSH session:
-    // 25 steps / 24 tool calls / 19KB artifact vs 101K reasoning chars and
-    // zero action with the full polluted system). The band classification
-    // still selects the near-field guidance for later turns.
-    const persona = 'You are a helpful software engineer assistant.'
-
-    // The persona stays constant for the whole session; only the tool
-    // surface changes once, after the first durable tool/call.
-    //
-    // v0.2.0 interface restoration: the first request carries ONLY the router
-    // persona — the identity, web-orientation, tool-guidance and rule sections
-    // are interface pollution (measured: 101K reasoning chars / zero action in
-    // a real session with the full 6.5K-char system, vs 25-step / 24-tool-call
-    // working session with a 46-char system on the official API and DSH).
-    // This mirrors the minimal preset's `complete: true` semantics. The
-    // plan-mode section is kept when present so plan boundaries do not reset
-    // the model's focus.
+    // ── 模式分派 ──
+    // standard（RL 接口还原）: 首轮 system = 只有 RL 训练句；身份/Web 定位/工具引导/
+    // 规则 sections 全部移除（minimal 的 complete:true 语义，实测 46 字符 system →
+    // 25 步迭代工作流）。
+    // spec（深度思考优先）: 分类 persona + 保留全部 sections（首轮超长思维链是特征）。
     const planSection = (assembled.sections || []).find((s) => /plan/i.test(s.name))
-    const sections = planSection
-      ? [planSection, { name: 'router-persona', text: persona, order: 0 }]
-      : [{ name: 'router-persona', text: persona, order: 0 }]
+    let sections
+    let core
+    let persona
+    if (routerMode === 'standard') {
+      persona = RL_PERSONA
+      sections = planSection
+        ? [planSection, { name: 'router-persona', text: persona, order: 0 }]
+        : [{ name: 'router-persona', text: persona, order: 0 }]
+      core = new Set(['str_replace_editor']) // RL shape: shell + editor
+    } else {
+      persona = personaFor(mode, modelId)
+      sections = applyPersona(assembled.sections, persona) // keep all other sections
+      core = new Set(legacyCore(mode))
+    }
 
     if (session.events.some((event) => event.type === 'tool/call')) {
       return { ...assembled, sections, contexts: [] } // promoted: full catalog
     }
 
-    const core = new Set(coreFor(mode))
     const available = new Set(assembled.tools.map((tool) => tool.name))
     const shell = available.has('pwsh') ? 'pwsh' : available.has('bash') ? 'bash' : null
     if (shell === null) {
@@ -177,6 +190,7 @@ export function apply(ctx, config) {
       const mode = overrides.get(session.id) ?? sessionMode(session)
       const modelId = currentAgent()?.options?.model
       return [
+        `router-mode=${routerMode} (standard=RL接口还原 / spec=深度思考优先)`,
         `mode=${fmtMode(mode)} (band=${bandFor(mode)})`,
         `persona=${personaFor(mode, modelId).replace(/\n/g, ' / ')}`,
         `core=[${coreFor(mode).join(', ')}]`,

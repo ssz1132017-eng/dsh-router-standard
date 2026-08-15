@@ -1,8 +1,15 @@
 # dsh-router-standard
 
-**Task-aware reasoning-mode router for DeepSeek Harness.** One preset, one
-continuous `react ↔ spec` axis, **three measured behavior bands**, and a router
-that picks the right band from the task before the first model request.
+**Task-aware reasoning-mode router for DeepSeek Harness.** One preset, two
+**routing modes** (v0.2.0 naming), plus the measured three-band axis behind them:
+
+| routing mode | first request | behavior |
+|---|---|---|
+| **standard（标准路由模式，默认）** | RL 接口还原：只有 RL 训练句（`You are a helpful software engineer assistant.`）+ shell/str_replace_editor | 想一段、做一段（实测：25 步 / 24 工具调用 / 产出文件） |
+| **spec（spec 路由模式）** | 分类 persona（spec/react/weak）+ 完整 prompt sections | 深度思考优先，首轮超长思维链（101K 推理 0 行动是其特征，不是缺陷） |
+
+> 选择：`agent.cordis.yml` 的 `router-bootstrap.config.routerMode`（standard/spec）。
+> `dev_router_status` 显示当前路由模式。
 
 > This is a research artifact. It encodes a measured property of DeepSeek V4
 > Pro / V4 Flash: model behavior along the persona axis is **not a continuum**
@@ -12,17 +19,21 @@ that picks the right band from the task before the first model request.
 
 ## What it does
 
-Reads the session's first user message, classifies the task, and on the first
-model request injects:
+**standard mode**: on the first model request the system prompt is reduced to
+the RL training sentence alone (identity/web/tool-guidance sections removed —
+the minimal preset's `complete: true` semantics) with the RL two-tool surface
+(shell + str_replace_editor). The model then works in think-act feedback loops
+instead of one exhausted reasoning chain.
 
-1. a **persona** matching the reasoning mode (spec plan-first / react doer), and
-2. a **first-turn core tool set** (read-first for spec, write-first for react).
+**spec mode**: reads the session's first user message, classifies the task, and
+on the first model request injects the matching persona + first-turn core tool
+set; the model reasons deeply first (the long chain is the point).
 
 After the first durable tool call the full Standard catalog is exposed and the
 router stops touching anything. The mode is derived from durable session
 events, so resume/reload keeps it. The plan-mode prompt section is preserved
-(only the persona section is replaced), so plan boundaries do not reset the
-model's focus.
+(standard mode keeps it alongside the RL persona), so plan boundaries do not
+reset the model's focus.
 
 ## The three measured behavior bands
 
