@@ -288,13 +288,4 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
-# ── 完整 PTC 基座（v0.4）────────────────────────────────────────────────────
-#
-# 全程 Code Mode：模型写 TypeScript 程序对生成 SDK 操作，run_code 一次执行
-# （五轮往返变一轮）。首轮 SDK 段完整保留（tools:code-only + tools:sdk），
-# 行动推力来自 We-Team 近场引导（决策节奏 + 每句一动作）。
-- id: tool-presentation
-  name: '@deepseek-ai/dsh-agent-tool-presentation'
-  config:
-    mode: code
 
