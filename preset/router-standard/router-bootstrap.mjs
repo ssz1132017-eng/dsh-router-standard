@@ -160,7 +160,10 @@ export function apply(ctx, config) {
         return { ...assembled, sections: finalSections, contexts: [] }
       }
       const shell = available.has('pwsh') ? 'pwsh' : available.has('bash') ? 'bash' : null
-      if (shell === null) throw new Error(`${name}: no platform shell in catalog`)
+      // 渐进披露下 shell 是阶段工具（验证阶段解锁）——缺失是正常态，放行。
+      if (shell === null) {
+        return { ...assembled, sections: baseSections, contexts: [] }
+      }
       const core = new Set(['str_replace_editor', shell, 'tools_catalog', 'tools_help'])
       return { ...assembled, sections: baseSections, contexts: [], tools: assembled.tools.filter((tool) => core.has(tool.name)) }
     }
