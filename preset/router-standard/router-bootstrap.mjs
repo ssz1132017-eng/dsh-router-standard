@@ -262,18 +262,19 @@ export function apply(ctx, config) {
     if (userMsg === undefined) return decision
     const sid = agent.session.id
     // Bootstrap once：第一个真实用户消息前注入（阶段机制声明）
+    // 时序修复：Bootstrap 直接注入 decision.messages（与用户消息同一请求——
+    // 第一步就可见；next-step 队列会让模型"先回复后被迫回应"（用户看到的自动注入））
     if (!bootstrapInjected.has(sid)) {
       bootstrapInjected.add(sid)
       const stage = ensureStage()[sid]?.stage ?? 0
       const guide = START_GUIDE + '\n' + STAGE_GUIDES[Math.min(stage, STAGE_GUIDES.length - 1)]
-      try {
-        agent.inbox.append('next-step', {
-          id: 'bootstrap-' + Date.now(),
-          role: 'user',
-          source: { kind: 'plugin', plugin: 'router-bootstrap' },
-          content: [{ type: 'text', text: guide }],
-        })
-      } catch { /* skip */ }
+      const snap = {
+        id: 'bootstrap-' + Date.now(),
+        role: 'user',
+        source: { kind: 'plugin', plugin: 'router-bootstrap' },
+        content: [{ type: 'text', text: guide }],
+      }
+      return { kind: 'enter', messages: [...messages, snap] }
     }
     return decision
   })
