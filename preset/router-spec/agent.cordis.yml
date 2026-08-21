@@ -55,7 +55,7 @@
 #   spec — 深度思考优先: classified persona + full prompt sections; the long
 #     first-turn reasoning chain (101K chars) is a feature, not a defect.
 - id: router-bootstrap
-  name: ./router-bootstrap-v1.mjs
+  name: ./router-bootstrap.mjs
   config:
     routerMode: spec
 

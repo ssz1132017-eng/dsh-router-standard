@@ -20,7 +20,7 @@
  */
 
 import {
-  applyPersona, bandFor, bandOf, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01, extractText, classifyTask,
+  applyPersona, bandFor, bandOf, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
   isComplexTask,
 } from './router-core.mjs'
 
@@ -48,17 +48,6 @@ export function apply(ctx, config) {
   const overrides = new Map() // session id -> explicit mode (number 0..1)
   const agents = new Map() // session id -> Agent (live handle, in-process only)
   const firstUserText = new Map() // session id -> first REAL user message text (issue #3 fix)
-  /** Unified mode: override value, else first-user-text classification,
-   *  else session state. Raw text into bandOf() would clamp01(NaN) -> 0 -> spec
-   *  for EVERY text. */
-  function currentMode(session) {
-    const override = overrides.get(session.id)
-    if (override !== undefined) return override
-    const text = firstUserText.get(session.id)
-    if (text !== undefined) return classifyTask(text)
-    return sessionMode(session)
-  }
-  const sessionModels = new Map() // session id -> { provider, model } from assembled.variables (#9)
 
   // ── 路由模式（v0.2.0 命名，用户定义）───────────────────────────────────────
   // standard（默认，新）: RL 接口还原——首轮只有 RL 训练句 + shell/str_replace_editor，
@@ -80,9 +69,6 @@ export function apply(ctx, config) {
     const assembled = await next()
     const agent = context.agent
     if (agent === undefined) return assembled
-    // Spawned subagents are clean child tasks with their own scoped tool sets;
-    // the router governs root (user) sessions only (#5).
-    if (agent.session?.header?.parentSession !== undefined) return assembled
     const session = agent.session
     agents.set(session.id, agent)
 
@@ -91,13 +77,8 @@ export function apply(ctx, config) {
     // and injected the WEAK band on the path-committing first request. Use the
     // live text captured by the session/event listener (or inbox pending) so
     // the first request carries the REAL classification.
-    const mode = currentMode(session)
-    // #9 fix: the session-selected model rides assembled.variables, NOT agent.options.
-    const selectedModel = assembled.variables?.model
-      ? { provider: assembled.variables?.provider, model: assembled.variables.model }
-      : undefined
-    if (selectedModel?.model) sessionModels.set(session.id, selectedModel)
-    const modelId = selectedModel?.model ?? agent.options?.model
+    const mode = overrides.get(session.id) ?? firstUserText.get(session.id) ?? sessionMode(session)
+    const modelId = agent.options?.model
 
     // ── 模式分派 ──
     // standard（RL 接口还原）: 首轮 system = 只有 RL 训练句；身份/Web 定位/工具引导/
@@ -110,8 +91,13 @@ export function apply(ctx, config) {
     let persona
     if (routerMode === 'standard') {
       persona = RL_PERSONA
-      sections = planSection
-        ? [planSection, { name: 'router-persona', text: persona, order: 0 }]
+      // PTC 基座（v0.4）：code mode 下必须保留 tools:code-only（只有 run_code 可
+      // 调用）与 tools:sdk（生成 SDK 说明）两段，否则模型不知道 run_code 的正确
+      // 用法（实测：SDK 段被清后模型把 run_code 当 node 计算器用，不做文件操作）。
+      // 其余身份/Web/工具引导段仍清除（接口还原）。
+      const codeSections = (assembled.sections || []).filter((s) => /^tools:(code-only|sdk)$/.test(s.name))
+      sections = planSection || codeSections.length
+        ? [...codeSections, ...(planSection ? [planSection] : []), { name: 'router-persona', text: persona, order: 0 }]
         : [{ name: 'router-persona', text: persona, order: 0 }]
       core = new Set(['str_replace_editor']) // RL shape: shell + editor
     } else {
@@ -127,6 +113,12 @@ export function apply(ctx, config) {
     const available = new Set(assembled.tools.map((tool) => tool.name))
     const shell = available.has('pwsh') ? 'pwsh' : available.has('bash') ? 'bash' : null
     if (shell === null) {
+      // PTC 基座（v0.4 实验）：code mode 下模型面只有 run_code（原生 schema
+      // 全省略），没有 shell——工具面收窄无意义，直接放行（persona/sections
+      // 逻辑照常）。
+      if (available.has('run_code')) {
+        return { ...assembled, sections, contexts: [] }
+      }
       throw new Error(`${name}: no platform shell in catalog`)
     }
     core.add(shell)
@@ -152,20 +144,6 @@ export function apply(ctx, config) {
   const GUIDE_DEEP =
     '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first. Think deeply about the architecture, edge cases, and integration points. Do not spend reasoning on the environment or tooling. Produce when your information is complete. End each reasoning block with a decision or an information need.'
 
-  // ── first-turn routing: agent/inbox/claimed (#17/#32) ─────────────────
-  // The loop claims the inbox BEFORE assembling the system prompt, so the
-  // FIRST request already sees the REAL classification. Filter source.kind
-  // === 'user' so plugin-injected steering can never pin the wrong band.
-  ctx.on('agent/inbox/claimed', ({ agent, message }) => {
-    if (message?.source?.kind !== 'user') return
-    const text = extractText(message)
-    if (!text.trim()) return
-    const session = agent?.session
-    if (session !== undefined && !firstUserText.has(session.id)) {
-      firstUserText.set(session.id, text.trim())
-    }
-  })
-
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'user/message') return
     const data = event.data ?? {}
@@ -177,13 +155,10 @@ export function apply(ctx, config) {
     const agent = ctx.get('agent')
     const target = agent !== undefined && agent.session === session ? agent : [...agents.values()].find((a) => a.session === session)
     if (target === undefined || target.inbox === undefined) return
-    const mode = currentMode(session)
+    const mode = overrides.get(session.id) ?? firstUserText.get(session.id) ?? sessionMode(session)
     if (bandOf(mode) !== 'weak') return // strong modes need no guidance
     if (!text.trim()) return
     const guide = isComplexTask(text) ? GUIDE_DEEP : GUIDE_WEAK
-    // #32D: the listener runs INSIDE the user/message append dispatch window;
-    // session.append has a reenter guard, so defer to a microtask.
-    queueMicrotask(() => {
     try {
       target.inbox.append('next-step', {
         id: `router-guide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -192,7 +167,6 @@ export function apply(ctx, config) {
         content: [{ type: 'text', text: guide }],
       })
     } catch { /* duplicate/ordering races: skip */ }
-    })
   })
 
   // ── router visibility & tuning (agent self-optimization) ────────────────
@@ -224,8 +198,8 @@ export function apply(ctx, config) {
     execute() {
       const session = currentSession()
       if (session === undefined) return 'no agent session'
-      const mode = currentMode(session)
-      const modelId = sessionModels.get(session.id)?.model ?? currentAgent()?.options?.model
+      const mode = overrides.get(session.id) ?? sessionMode(session)
+      const modelId = currentAgent()?.options?.model
       return [
         `router-mode=${routerMode} (standard=RL接口还原 / spec=深度思考优先)`,
         `mode=${fmtMode(mode)} (band=${bandFor(mode)})`,
