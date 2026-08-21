@@ -280,6 +280,13 @@ export function apply(ctx, config) {
   }
 
   // ── 闯关：phase_advance（AI 自主选择进入下一阶段）────────────────────
+  const registerTool = (tool) => {
+    ctx.effect(() => ctx.tools.register({
+      ...tool,
+      parameters: toJsonSchema(tool.parameters),
+    }))
+  }
+
   registerTool({
     name: 'phase_advance',
     description: '闯关推进：声明当前阶段已完成，进入下一阶段（解锁新工具 + 阶段切换提示）。仅在明确完成本阶段工作时调用。',
