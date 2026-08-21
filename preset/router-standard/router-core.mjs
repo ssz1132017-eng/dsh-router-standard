@@ -147,8 +147,10 @@ export function classifyTask(text) {
 
 /** Per-session mode derived from durable events (resume-safe). */
 export function sessionMode(session) {
-  const events = session.events
-  const userMsg = events.find((e) => e.type === 'user/message')
+  const events = session.events || []
+  // #13：跳过插件注入的消息（approval/runtime-context/router 引导）——它们不代表任务
+  const userMsg = events.find((e) => e.type === 'user/message' && e.data?.source?.kind !== 'plugin')
+    ?? events.find((e) => e.type === 'user/message')
   return classifyTask(extractText(userMsg?.data))
 }
 
@@ -160,6 +162,23 @@ export function extractText(data) {
   const payload = data && typeof data.message === 'object' && data.message !== null ? data.message : data
   const content = Array.isArray(payload.content) ? payload.content : []
   return content.map((c) => (typeof c === 'string' ? c : (c.text ?? ''))).join(' ')
+}
+
+/**
+ * Advance the phase by one level at most, from durable session evidence
+ * (tool calls) plus the current user text. Pure and idempotent, so replaying
+ * a session's events after a restart reproduces its phase exactly (resume-safe
+ * phase routing, v0.8).
+ */
+export function advanceStage(stage, toolNames, text) {
+  const names = Array.isArray(toolNames) ? toolNames : []
+  const words = typeof text === 'string' ? text : ''
+  let s = stage
+  // 文本信号收紧（P2 反馈）：/方案|计划/ 宽匹配误触发——只认明确开发指令
+  if (s === 0 && (names.includes('todo_write') || /开始开发|进入开发|着手实现|开始实现|write the code/i.test(words))) s = 1
+  if (s === 1 && names.some((n) => ['write', 'edit', 'str_replace_editor'].includes(n))) s = 2
+  if (s === 2 && (names.includes('pwsh') || names.includes('bash') || /完成|finished|done|验证/i.test(words))) s = 3
+  return s
 }
 
 export function clamp01(v) {

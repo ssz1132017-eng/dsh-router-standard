@@ -1,5 +1,9 @@
 /**
- * router-bootstrap (standard edition v0.7): progressive tool disclosure revolution.
+ * router-bootstrap (standard edition v0.9): progressive tool disclosure revolution —
+ * self-routed phases: one bootstrap guide per session, then zero injection.
+ * Stage state is persisted per session (resume-safe) and shown as system-prompt
+ * state (router-stage section + dev_router_status); tools unlock like levels,
+ * with the next tier pre-unlocked — using it advances the phase.
  *
  * 设计（用户定稿）：
  *   - 渐进式披露革命：阶段化渐进解锁（了解→方案→开发→验证→全量），
@@ -17,8 +21,11 @@
 
 import {
   applyPersona, bandFor, bandOf, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
-  classifyTask, extractText, isComplexTask,
+  classifyTask, extractText, isComplexTask, advanceStage,
 } from './router-core.mjs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'router-bootstrap'
@@ -73,17 +80,64 @@ const GLOBAL_SAFE = [
   'read', 'write', 'edit', 'glob', 'grep', 'web_search', 'ask_user_question',
   'todo_write', 'exit_plan_mode', 'pwsh', 'bash', 'read_image',
   'job_list', 'job_output', 'job_kill', 'str_replace_editor',
+  // P0-2: 二级披露/自查工具（bootstrap 注册，预设层=继承面会被 agent 层 restrict 过滤——必须入 allow）
+  'tools_catalog', 'tools_help', 'dev_router_status', 'dev_router_mode',
+  // P1-1: 记忆/知识工具（engram-relay 注入的 global 工具——restrict 过滤后 SDK 不含 → 声明与事实脱节）
+  'engram_recall', 'engram_store', 'engram_propose', 'engram_confirm', 'engram_reject',
+  'engram_open', 'engram_search', 'engram_link', 'engram_update', 'engram_remove',
+  'engram_promote', 'engram_status', 'engram_verify', 'engram_respond',
 ]
 
 /** 阶段解锁指引（注入到用户消息后）。 */
-const STAGE_GUIDES = [
-  '\n\nPhase: understanding. Tools: read/glob/grep/web_search/ask_user_question + memory & knowledge (engram_recall to wake prior work, engram_verify/engram_respond to ground claims). Align on the task: recall, read, clarify. To unlock planning, state our understanding and open a plan (todo_write).',
-  '\n\nPhase: planning. Tools added: todo_write + memory review (engram_search/engram_open). Fit a concrete approach: consult what we know, decide the path, split steps, lock the plan. To unlock development (write/edit/str_replace_editor), complete the plan and write our first todo.',
-  '\n\nPhase: development. Tools added: write/edit/str_replace_editor + memory write (engram_store/engram_link to persist decisions). Produce directly, one action per step. To unlock verification (pwsh/bash/read_image), finish the deliverable and say so.',
-  '\n\nPhase: verification. Tools added: pwsh/bash/read_image/jobs. Verify what we built: run it, inspect output, fix what fails. When verified, deliver — the full catalog opens.',
-]
+/** 开局引导：每个会话只注入一次；之后阶段由 agent 自主路由，不再注入任何指引。 */
+const START_GUIDE =
+  '\n\nBootstrap (once per session): this is a progressive tool-unlock session — tools open in phases like a leveling game. '
+  + 'Unlock order: understanding (read/glob/grep/web_search/ask_user_question) → planning (todo_write) → development (write/edit/str_replace_editor) → verification (pwsh/bash/read_image/jobs). '
+  + 'Your current phase and unlocked tools are always visible in the system prompt (router-stage section) and via dev_router_status. '
+  + 'You route yourself: to advance, use a tool of the next tier (it is pre-unlocked for you to try), or state that the current phase is done. '
+  + 'This guide appears only once; after this, no phase messages are injected.'
 
-const stageOf = new Map() // session id -> 0..3
+/** 阶段状态（持久化）：session id -> { stage: 0..3, guided: 开局引导是否已注入 }。 */
+const stageFile = () => process.env.DSH_ROUTER_STAGE_FILE || join(homedir(), '.dsh', 'router-standard', 'stages.json')
+let stageCache = null // { file, state } — 按文件路径缓存，env 切换（测试）自动重载
+
+function ensureStage() {
+  const file = stageFile()
+  if (stageCache === null || stageCache.file !== file) {
+    stageCache = { file, state: loadStageState() }
+  }
+  return stageCache.state
+}
+
+function loadStageState() {
+  try {
+    const parsed = JSON.parse(readFileSync(stageFile(), 'utf8'))
+    if (parsed && typeof parsed === 'object' && parsed.sessions && typeof parsed.sessions === 'object') {
+      const out = {}
+      for (const [sid, st] of Object.entries(parsed.sessions)) {
+        const stage = Number(st?.stage)
+        if (Number.isInteger(stage) && stage >= 0 && stage <= 3) {
+          out[sid] = { stage, guided: st?.guided === true }
+        }
+      }
+      return out
+    }
+  } catch { /* first run or unreadable: start empty */ }
+  return {}
+}
+
+function saveStageState() {
+  try {
+    mkdirSync(dirname(stageFile()), { recursive: true })
+    const sessions = Object.fromEntries(Object.entries(ensureStage()).slice(-1000))
+    writeFileSync(stageFile(), JSON.stringify({ version: 2, savedAt: new Date().toISOString(), sessions }, null, 2), 'utf8')
+  } catch { /* persistence failure: keep working in memory */ }
+}
+
+function sessionStage(sid) {
+  const st = (ensureStage()[sid] ??= { stage: 0, guided: false })
+  return st.stage
+}
 
 export function apply(ctx, config) {
   const overrides = new Map()
@@ -112,7 +166,7 @@ export function apply(ctx, config) {
       ...stageTools.map((t) => '- ' + t),
       '',
       '## 完整注册表（48+ 项）',
-      '任意工具均可 import 调用（SDK 按需解析签名）；tools_catalog / tools_help 可查询完整清单与用法。',
+      'run_code 内通过 await tools.<name>(args) 调用任意工具（SDK 按需解析签名）；tools_catalog / tools_help 可查询完整清单与用法。',
     ]
     return { ...sdk, text: lines.join('\n') }
   }
@@ -122,7 +176,8 @@ export function apply(ctx, config) {
     try {
       const toolsSvc = agent.ctx.get('tools')
       if (toolsSvc && typeof toolsSvc.restrict === 'function') {
-        const allowed = new Set(STAGES.slice(0, stage + 1).flatMap((s) => s.tools))
+        // 预放一档：下一阶段工具可见可用（通关式渐进解锁），使用后即推进
+        const allowed = new Set(STAGES.slice(0, Math.min(stage + 2, STAGES.length)).flatMap((s) => s.tools))
         toolsSvc.restrict({ allow: [...allowed].filter((t) => GLOBAL_SAFE.includes(t)) })
       }
     } catch { /* scope-local names in allow: skip restrict, keep full catalog */ }
@@ -142,13 +197,21 @@ export function apply(ctx, config) {
     if (selectedModel?.model) sessionModels.set(session.id, selectedModel)
 
     const promoted = session.events.some((event) => event.type === 'tool/call')
-    const stage = stageOf.get(session.id) ?? 0
+    const stage = sessionStage(session.id)
 
     // 首轮/未 promoted：RL 句 + 披露声明 + 泄压引导（轻 system）
     const planSection = (assembled.sections || []).find((s) => /plan/i.test(s.name))
+    const stageSection = {
+      name: 'router-stage',
+      order: 1,
+      text: 'Current phase: ' + STAGES[stage].name + ' (' + stage + '/3). Unlocked tools: '
+        + STAGES.slice(0, Math.min(stage + 2, STAGES.length)).flatMap((s) => s.tools).join(', ')
+        + ' (next tier pre-unlocked).\nPhase is self-routed state: you decide when to advance — '
+        + 'use a next-tier tool or state that the current phase is done. dev_router_status shows the live state.',
+    }
     const baseSections = planSection
-      ? [planSection, { name: 'router-persona', text: RL_PERSONA + '\n\n' + PROGRESSIVE_DECL + PRESSURE_GUIDE, order: 0 }]
-      : [{ name: 'router-persona', text: RL_PERSONA + '\n\n' + PROGRESSIVE_DECL + PRESSURE_GUIDE, order: 0 }]
+      ? [planSection, { name: 'router-persona', text: RL_PERSONA + '\n\n' + PROGRESSIVE_DECL + PRESSURE_GUIDE, order: 0 }, stageSection]
+      : [{ name: 'router-persona', text: RL_PERSONA + '\n\n' + PROGRESSIVE_DECL + PRESSURE_GUIDE, order: 0 }, stageSection]
 
     if (!promoted) {
       applyStageRestrict(agent, stage)
@@ -172,11 +235,12 @@ export function apply(ctx, config) {
     const sections = (assembled.sections || []).map((s) =>
       /persona/i.test(s.name) ? { ...s, text: RL_PERSONA } : s
     )
+    sections.push(stageSection)
+    applyStageRestrict(agent, stage)
     return { ...assembled, sections, contexts: [] }
   })
 
-  // ── 阶段指引注入（pre-step）：每条真实用户消息后注入当前阶段指引 ────────
-  const guidedUserMessages = new Set()
+  // ── 自主路由（pre-step）：开局引导仅一次；之后只推进阶段，不再注入指引 ──
   ctx.on('agent/pre-step', async ({ agent, messages }, next) => {
     const decision = await next()
     if (decision?.kind !== 'enter') return decision
@@ -184,31 +248,39 @@ export function apply(ctx, config) {
     const userMsg = messages.find((m) => m.role === 'user' && m.source?.kind === 'user')
     if (userMsg === undefined) return decision
     const text = extractText(userMsg)
-    if (!text.trim() || guidedUserMessages.has(userMsg.id)) return decision
-    guidedUserMessages.add(userMsg.id)
+    if (!text.trim()) return decision
 
     const sid = agent.session.id
-    const stage = stageOf.get(sid) ?? 0
-    const events = agent.session.events || []
-    const toolNames = events.filter((e) => e.type === 'tool/call').map((e) => e.data?.name || e.data?.toolName || '')
-    let nextStage = stage
-    if (stage === 0 && (toolNames.includes('todo_write') || /方案|计划|plan/i.test(text))) nextStage = 1
-    if (stage === 1 && toolNames.some((n) => ['write', 'edit', 'str_replace_editor'].includes(n))) nextStage = 2
-    if (stage === 2 && (toolNames.includes('pwsh') || toolNames.includes('bash') || /完成|finished|done|验证/i.test(text))) nextStage = 3
-    if (nextStage > stage) {
-      stageOf.set(sid, nextStage)
-      applyStageRestrict(agent, nextStage)
+    const st = (ensureStage()[sid] ??= { stage: 0, guided: false })
+
+    // 开局引导：每个会话只注入一次（标记持久化，关闭/恢复会话不重放）
+    if (!st.guided) {
+      st.guided = true
+      saveStageState()
+      try {
+        agent.inbox.append('next-step', {
+          id: 'router-start-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+          role: 'user',
+          source: { kind: 'plugin', plugin: 'router-bootstrap' },
+          content: [{ type: 'text', text: START_GUIDE }],
+        })
+      } catch { /* duplicate/ordering races: skip */ }
+      return decision
     }
 
-    const guide = STAGE_GUIDES[Math.min(stage, STAGE_GUIDES.length - 1)]
-    try {
-      agent.inbox.append('next-step', {
-        id: 'router-guide-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-        role: 'user',
-        source: { kind: 'plugin', plugin: 'router-bootstrap' },
-        content: [{ type: 'text', text: guide }],
-      })
-    } catch { /* duplicate/ordering races: skip */ }
+    // 阶段推进（自主）：调用了下一档工具 / 用户文本信号 → 解锁下一档
+    const events = agent.session.events || []
+    // P0-1: PTC 底座下嵌套调用记录为 tool/code-dispatch(-start)（data.name 顶层）——
+    // 三种事件都提取（用户实测：只认 tool/call 时阶段推进失效，永远 0/3）
+    const toolNames = events
+      .filter((e) => ['tool/call', 'tool/code-dispatch', 'tool/code-dispatch-start'].includes(e.type))
+      .map((e) => e.data?.name || e.data?.toolName || '')
+    const nextStage = advanceStage(st.stage, toolNames, text)
+    if (nextStage > st.stage) {
+      st.stage = nextStage
+      applyStageRestrict(agent, nextStage)
+      saveStageState()
+    }
     return decision
   })
 
@@ -321,12 +393,13 @@ export function apply(ctx, config) {
       const session = currentSession()
       if (session === undefined) return 'no agent session'
       const mode = overrides.get(session.id) ?? sessionMode(session)
-      const stage = stageOf.get(session.id) ?? 0
+      const stage = sessionStage(session.id)
       const modelId = sessionModels.get(session.id)?.model ?? currentAgent()?.options?.model
       return [
-        `router=standard (渐进披露 v0.7)`,
+        `router=standard (渐进披露 v0.9, self-routed)`,
         `phase=${STAGES[stage].name}（阶段 ${stage}/3）`,
-        `unlocked=[${STAGES.slice(0, stage + 1).flatMap((s) => s.tools).join(', ')}]`,
+        `persisted=${Object.hasOwn(ensureStage(), session.id)}`,
+        `unlocked=[${STAGES.slice(0, Math.min(stage + 2, STAGES.length)).flatMap((s) => s.tools).join(', ')}] (next tier pre-unlocked)`,
         `mode=${fmtMode(mode)} (band=${bandFor(mode)})`,
         `persona=${RL_PERSONA}`,
         `firstUser=${(firstUserText.get(session.id) ?? '').slice(0, 60)}`,

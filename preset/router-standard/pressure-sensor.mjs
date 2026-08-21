@@ -17,14 +17,16 @@ export const name = 'pressure-sensor'
 
 export const inject = ['systemPrompt']
 
-const LOG = 'C:\\Users\\Eldwen\\.dsh\\pressure-sensor-debug.log'
+import { homedir } from 'node:os'
+const LOG = homedir() + '\\.dsh\\pressure-sensor-debug.log'
 function log(msg) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`, 'utf8') } catch { /* ignore */ }
 }
 
 // 压力阈值（可配置）
 const CHARS_PER_STEP = 30000 // 单步推理字符阈值
-const LOOP_PATTERN = /\b(but wait|actually|hold on|重新确认|让我再|再想想|hmm|等一下)\b/gi
+// P2: JS \b 对中文无效（中文非 \w）——中文词单独匹配
+const LOOP_PATTERN = /(but wait|actually|hold on|hmm|重新确认|让我再|再想想|等一下)/gi
 const LOOP_HITS = 4 // 循环词阈值
 const NO_TOOL_STEPS = 3 // 连续无工具调用步数阈值
 
