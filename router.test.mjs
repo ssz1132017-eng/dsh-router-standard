@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   classifyTask, personaFor, coreFor, bandFor, testinessFor, parseMode, applyPersona,
   isFlashModel, extractText, sessionMode,
-} from './preset/router-core.mjs'
+} from './preset/router-standard/router-core.mjs'
 
 test('react: greenfield/build tasks map to react band', () => {
   assert.equal(bandFor(classifyTask('需要本地开发一个马里奥网页小游戏，参考经典原版')), 'react')
@@ -45,6 +45,27 @@ test('issue #1: plugin-generated nested user/message shape still classifies', ()
   // sessionMode 用首条 user/message（嵌套形状）
   const session = { events: [{ type: 'user/message', data: nested }] }
   assert.equal(sessionMode(session), 1)
+})
+
+test('issue #13: sessionMode skips plugin-origin messages when pinning the band', () => {
+  // 真实链路上首条落库的 user/message 常常是插件注入的（approval 通知、
+  // runtime-context 快照、agent-instructions、router 引导），它们不能参与分类。
+  const buildTask = { kind: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '从零开发一个马里奥网页游戏' }] }
+  const approval = { kind: 'user', source: { kind: 'plugin', plugin: 'user-approval' }, content: [{ type: 'text', text: 'The approval policy changed from "ask" to "never"' }] }
+  const snapshot = { kind: 'user', source: { kind: 'plugin', plugin: 'runtime-context' }, content: [{ type: 'text', text: 'cwd snapshot' }] }
+  const guide = { id: 'router-guide-x', kind: 'user', source: { kind: 'plugin', plugin: 'router-bootstrap' }, content: [{ type: 'text', text: 'Router: classify this task now' }] }
+  // 插件消息在前、真实用户消息在后 → 必须按真实消息分类（react）
+  assert.equal(sessionMode({ events: [
+    { type: 'user/message', data: approval },
+    { type: 'user/message', data: snapshot },
+    { type: 'user/message', data: guide },
+    { type: 'user/message', data: buildTask },
+  ] }), 1)
+  // 只有插件消息 → 退化到首条 user/message（旧行为，不抛错）
+  assert.equal(sessionMode({ events: [{ type: 'user/message', data: approval }] }), 'weak')
+  // 无 source 的历史消息按用户消息处理
+  const legacy = { kind: 'user', content: [{ type: 'text', text: '修复这个仓库里的 bug' }] }
+  assert.equal(sessionMode({ events: [{ type: 'user/message', data: legacy }] }), 0)
 })
 
 test('weak persona is model-specific (P11/P24)', () => {

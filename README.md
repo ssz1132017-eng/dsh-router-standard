@@ -18,7 +18,7 @@
 
 | routing mode | first request | thinking shape |
 |---|---|---|
-| **standard（标准路由预设）** | RL 接口还原：只有 RL 训练句（`You are a helpful software engineer assistant.`）+ shell/str_replace_editor | **没有雷霆大思考**：想一段做一段（实测：25 步 / 24 工具调用 / 产出文件；单步推理 ~3.9K，思考总量与其他模式相当，但分散在行动之间） |
+| **standard（标准路由预设）** | 分类 persona（spec/react/weak）+ 完整 prompt sections + 分带首轮工具面 | 按分类带行动：react 直接产出、spec 先读后改、weak 内路由（每轮近距离引导） |
 | **spec（spec 路由预设）** | 分类 persona（spec/react/weak）+ 完整 prompt sections | **雷霆大思考**：首轮超长思维链（101K 推理 0 行动是其特征，不是缺陷） |
 
 > 选择：安装两个预设之一（Router Standard / Router Spec，见 Usage）。
@@ -30,23 +30,56 @@
 > The router therefore quantizes to the stable regions instead of pretending
 > the axis is continuously tunable.
 
+## v0.3.0 — real-assembly-chain fixes
+
+v0.2.x shipped routing logic that was validated against bare-API probes but
+was broken on the REAL DeepSeek Harness assembly chain. v0.3.0 fixes all of it,
+verified against `@deepseek-ai/dsh-agent-loop` (0.1.0-rc.7) event ordering:
+
+- **First-turn routing actually works** (issue #13): the loop claims the inbox
+  BEFORE assembling the system prompt, and `inbox.claim()` emits the
+  agent-scoped `agent/inbox/claimed` event synchronously — the router captures
+  the first REAL user message there (`source.kind === 'user'` only), so the
+  first request is classified instead of unconditionally falling into weak.
+  (The captured text is CLASSIFIED, not fed to bandOf raw — the old capture
+  path silently mapped every captured message to the spec band.)
+- **Near-field guidance moved to `agent/pre-step`** (issues #34/#36/#55):
+  `session/event` never fires inside agent-plane presets (dsh-scope filters
+  it out of entry-local realms), so the old inbox re-append never delivered
+  guidance — and wherever it did fire, the `next-step` append forced a SECOND
+  model request per user message (the 2× API-call spike). The guide is now
+  inserted into `decision.messages` at `agent/pre-step`: same request as the
+  user message, near-field, cache-neutral, zero extra round-trips.
+- **Fixes**: missing `extractText`/`bandOf` imports in both bootstrap files
+  (#11) — the `session/event` handlers crashed with ReferenceError whenever
+  they did fire; `sessionMode` ignoring plugin-origin messages when pinning
+  the band; `router.test.mjs` import path; preset.yml YAML quoting (#53);
+  subagent-session skip (#5); session-selected model from
+  `assembled.variables` (#9); the RL-standard mode of the spec preset now
+  returns the assembly untouched after the first tool/call (#44).
+- **New**: `router.integration.test.mjs` replays the real claim → assemble →
+  pre-step ordering against the actual bootstrap code.
+
 ## What it does
 
-**standard mode**: on the first model request the system prompt is reduced to
-the RL training sentence alone (identity/web/tool-guidance sections removed —
-the minimal preset's `complete: true` semantics) with the RL two-tool surface
-(shell + str_replace_editor). The model then works in think-act feedback loops
-instead of one exhausted reasoning chain.
+**router-standard**: reads the session's first REAL user message, classifies
+the task (build → react / fix → spec / ambiguous → weak), and on the first
+model request injects the matching persona while keeping the full prompt
+sections; the first-turn core tool surface follows the band
+(spec=read/edit/glob/grep, react=read/write/edit, weak=read/write/edit, each
+plus the platform shell). Weak-band sessions also get a near-field routing
+guide in the SAME request as every real user message.
 
-**spec mode**: reads the session's first user message, classifies the task, and
-on the first model request injects the matching persona + first-turn core tool
-set; the model reasons deeply first (the long chain is the point).
+**router-spec**: same routing core with the deep-think-first branding; keeps
+the v0.2.0 dual-mode code path (`routerMode`), so a copy configured with
+`routerMode: standard` still gets the RL-interface first turn (RL sentence +
+shell/str_replace_editor) with full sections restored after the first durable
+tool/call.
 
 After the first durable tool call the full Standard catalog is exposed and the
 router stops touching anything. The mode is derived from durable session
-events, so resume/reload keeps it. The plan-mode prompt section is preserved
-(standard mode keeps it alongside the RL persona), so plan boundaries do not
-reset the model's focus.
+events, so resume/reload keeps it. The plan-mode prompt section is preserved,
+so plan boundaries do not reset the model's focus.
 
 ## The three measured behavior bands
 
