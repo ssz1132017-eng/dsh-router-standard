@@ -182,11 +182,16 @@ export function apply(ctx, config) {
   /** 按当前阶段收紧 restrict（执行层门控；PTC 下 SDK 调用同样受限）。 */
   function applyStageRestrict(agent, stage) {
     try {
+      const sid = agent?.session?.id
+      // 叠加语义：restrict 是交集——先释放上次的再设新（否则解锁失效）
+      const prev = sid ? restrictLift.get(sid) : undefined
+      if (prev) { try { prev() } catch { /* ignore */ } }
       const toolsSvc = agent.ctx.get('tools')
       if (toolsSvc && typeof toolsSvc.restrict === 'function') {
         // 预放一档：下一阶段工具可见可用（通关式渐进解锁），使用后即推进
         const allowed = new Set(STAGES.slice(0, Math.min(stage + 2, STAGES.length)).flatMap((s) => s.tools))
-        toolsSvc.restrict({ allow: [...allowed].filter((t) => GLOBAL_SAFE.includes(t)) })
+        const disposer = toolsSvc.restrict({ allow: [...allowed].filter((t) => GLOBAL_SAFE.includes(t)) })
+        if (sid && disposer) restrictLift.set(sid, disposer)
       }
     } catch { /* scope-local names in allow: skip restrict, keep full catalog */ }
   }
