@@ -81,7 +81,7 @@ const GLOBAL_SAFE = [
   'todo_write', 'exit_plan_mode', 'pwsh', 'bash', 'read_image',
   'job_list', 'job_output', 'job_kill', 'str_replace_editor',
   // P0-2: 二级披露/自查工具（bootstrap 注册，预设层=继承面会被 agent 层 restrict 过滤——必须入 allow）
-  'tools_catalog', 'tools_help', 'dev_router_status', 'dev_router_mode',
+  'tools_catalog', 'tools_help', 'dev_router_status', 'dev_router_mode', 'phase_advance',
   // P1-1: 记忆/知识工具（engram-relay 注入的 global 工具——restrict 过滤后 SDK 不含 → 声明与事实脱节）
   'engram_recall', 'engram_store', 'engram_propose', 'engram_confirm', 'engram_reject',
   'engram_open', 'engram_search', 'engram_link', 'engram_update', 'engram_remove',
@@ -241,135 +241,33 @@ export function apply(ctx, config) {
   })
 
   // ── 自主路由（pre-step）：开局引导仅一次；之后只推进阶段，不再注入指引 ──
+    // ── 闯关机制（用户定稿）：初始引导 once + AI 自主 phase_advance ──────
+  // 不再每条消息注入阶段指引（自动注入是废话/干扰）；阶段推进 = 模型显式
+  // 调用 phase_advance（闯关选择）→ 解锁新工具 + 注入一次阶段切换提示。
+  let bootstrapInjected = new Set() // session id -> bootstrap once
+
   ctx.on('agent/pre-step', async ({ agent, messages }, next) => {
     const decision = await next()
     if (decision?.kind !== 'enter') return decision
     if (agent === undefined || agent.session === undefined || agent.inbox === undefined) return decision
     const userMsg = messages.find((m) => m.role === 'user' && m.source?.kind === 'user')
     if (userMsg === undefined) return decision
-    const text = extractText(userMsg)
-    if (!text.trim()) return decision
-
     const sid = agent.session.id
-    const st = (ensureStage()[sid] ??= { stage: 0, guided: false })
-
-    // 开局引导：每个会话只注入一次（标记持久化，关闭/恢复会话不重放）
-    if (!st.guided) {
-      st.guided = true
-      saveStageState()
+    // Bootstrap once：第一个真实用户消息前注入（阶段机制声明）
+    if (!bootstrapInjected.has(sid)) {
+      bootstrapInjected.add(sid)
+      const stage = stageOf.get(sid) ?? 0
+      const guide = START_GUIDE + '\n' + STAGE_GUIDES[Math.min(stage, STAGE_GUIDES.length - 1)]
       try {
         agent.inbox.append('next-step', {
-          id: 'router-start-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+          id: 'bootstrap-' + Date.now(),
           role: 'user',
           source: { kind: 'plugin', plugin: 'router-bootstrap' },
-          content: [{ type: 'text', text: START_GUIDE }],
+          content: [{ type: 'text', text: guide }],
         })
-      } catch { /* duplicate/ordering races: skip */ }
-      return decision
-    }
-
-    // 阶段推进（自主）：调用了下一档工具 / 用户文本信号 → 解锁下一档
-    const events = agent.session.events || []
-    // P0-1: PTC 底座下嵌套调用记录为 tool/code-dispatch(-start)（data.name 顶层）——
-    // 三种事件都提取（用户实测：只认 tool/call 时阶段推进失效，永远 0/3）
-    const toolNames = events
-      .filter((e) => ['tool/call', 'tool/code-dispatch', 'tool/code-dispatch-start'].includes(e.type))
-      .map((e) => e.data?.name || e.data?.toolName || '')
-    const nextStage = advanceStage(st.stage, toolNames, text)
-    if (nextStage > st.stage) {
-      st.stage = nextStage
-      applyStageRestrict(agent, nextStage)
-      saveStageState()
+      } catch { /* skip */ }
     }
     return decision
-  })
-
-  // ── 渐进式工具披露：二级注册表查询 ──────────────────────────────────────
-  const registerTool = (tool) => {
-    ctx.effect(() => ctx.tools.register({
-      ...tool,
-      parameters: toJsonSchema(tool.parameters),
-    }))
-  }
-
-  function toolIndex() {
-    const seen = new Set()
-    const out = []
-    for (const s of ctx.tools.schemas()) {
-      const name = s.name || s.function?.name
-      if (!name || seen.has(name)) continue
-      seen.add(name)
-      out.push({ name, desc: (s.description || s.function?.description || '').trim() })
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  registerTool({
-    name: 'tools_catalog',
-    description: '渐进式披露一级：全部工具（名称 + 一行摘要）。query 关键词过滤；domain 域浏览（file/exec/network/delegate/memory/other）。',
-    parameters: {
-      query: { type: 'string', description: '关键词过滤（子串匹配名称/摘要）' },
-      domain: { type: 'string', description: '域过滤：file / exec / network / delegate / memory / other' },
-    },
-    output: {
-      schema: { type: 'string' },
-      render: (_a, v) => [{ type: 'text', text: String(v) }],
-    },
-    async execute(args) {
-      const all = toolIndex()
-      const q = String(args.query || '').toLowerCase()
-      const d = String(args.domain || '').toLowerCase()
-      const dom = (n, desc) => {
-        const t = n + ' ' + desc
-        if (/(read|write|edit|glob|grep|str_replace_editor|fs|file|path)/i.test(t)) return 'file'
-        if (/(bash|pwsh|shell|run_code|exec|command|spawn)/i.test(t)) return 'exec'
-        if (/(web|search|fetch|http|network|browse)/i.test(t)) return 'network'
-        if (/(subagent|agent|delegate|workflow|ralph|fork)/i.test(t)) return 'delegate'
-        if (/(engram|memory|recall|store|search)/i.test(t)) return 'memory'
-        return 'other'
-      }
-      const rows = all.filter((t) => {
-        if (q && !(t.name + ' ' + t.desc).toLowerCase().includes(q)) return false
-        if (d && dom(t.name, t.desc) !== d) return false
-        return true
-      })
-      if (rows.length === 0) return '（无匹配工具）'
-      return rows.map((t) => '- ' + t.name + ' — ' + (t.desc.split(/\n|\. /)[0].slice(0, 90))).join('\n')
-    },
-  })
-
-  registerTool({
-    name: 'tools_help',
-    description: '渐进式披露二级：单个工具的完整 schema（参数/必需/描述）。精准调用前先查。',
-    parameters: {
-      name: { type: 'string', required: true, description: '工具名（tools_catalog 里查到的）' },
-    },
-    output: {
-      schema: { type: 'string' },
-      render: (_a, v) => [{ type: 'text', text: String(v) }],
-    },
-    async execute(args) {
-      const name = String(args.name || '').trim()
-      const all = toolIndex()
-      const t = all.find((x) => x.name === name)
-      if (!t) return '未知工具: ' + name + '（先用 tools_catalog 查）'
-      for (const s of ctx.tools.schemas()) {
-        const n = s.name || s.function?.name
-        if (n !== name) continue
-        const params = s.parameters || s.function?.parameters || {}
-        const props = params.properties || {}
-        const required = params.required || []
-        const lines = ['工具: ' + name, '描述: ' + (s.description || s.function?.description || '')]
-        const pLines = Object.entries(props).map(([k, v]) => {
-          const meta = v || {}
-          const req = required.includes(k) ? '（必需）' : ''
-          return '  ' + k + ': ' + (meta.type || 'any') + req + ' — ' + (meta.description || '')
-        })
-        if (pLines.length) lines.push('参数:', ...pLines)
-        return lines.join('\n')
-      }
-      return '未知工具: ' + name
-    },
   })
 
   // ── router visibility & tuning ───────────────────────────────────────────
@@ -380,6 +278,41 @@ export function apply(ctx, config) {
       description: 'band name (spec / weak / mixed / react)',
     },
   }
+
+  // ── 闯关：phase_advance（AI 自主选择进入下一阶段）────────────────────
+  registerTool({
+    name: 'phase_advance',
+    description: '闯关推进：声明当前阶段已完成，进入下一阶段（解锁新工具 + 阶段切换提示）。仅在明确完成本阶段工作时调用。',
+    parameters: {
+      reason: { type: 'string', description: '推进理由（可选，记录用）' },
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_a, v) => [{ type: 'text', text: String(v) }],
+    },
+    async execute(args) {
+      const session = currentSession()
+      if (session === undefined) return 'no agent session'
+      const sid = session.id
+      const stage = stageOf.get(sid) ?? 0
+      if (stage >= STAGES.length - 1) {
+        return 'already at the last stage (' + STAGES[stage].name + '); full catalog is open'
+      }
+      const next = stage + 1
+      stageOf.set(sid, next)
+      applyStageRestrict(currentAgent(), next)
+      const guide = STAGE_GUIDES[Math.min(next, STAGE_GUIDES.length - 1)]
+      try {
+        currentAgent()?.inbox.append('next-step', {
+          id: 'phase-' + next + '-' + Date.now(),
+          role: 'user',
+          source: { kind: 'plugin', plugin: 'router-bootstrap' },
+          content: [{ type: 'text', text: '\nPhase advanced: ' + STAGES[next].name + ' (stage ' + next + '/' + (STAGES.length - 1) + ').' + guide }],
+        })
+      } catch { /* skip */ }
+      return 'advanced to phase ' + next + ': ' + STAGES[next].name + ' (tools unlocked: ' + STAGES.slice(0, next + 1).flatMap((s) => s.tools).join(', ') + ')'
+    },
+  })
 
   registerTool({
     name: 'dev_router_status',
