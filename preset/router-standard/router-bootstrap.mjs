@@ -316,7 +316,12 @@ export function apply(ctx, config) {
         if (toolsSvc && typeof toolsSvc.presentAs === 'function') toolsSvc.presentAs('code')
       } catch { /* presentation already declared: ignore */ }
       // 注入 Bootstrap（声明 + 泄压 + 阶段 0 指引）
-      const guide = START_GUIDE + '\n\n' + PROGRESSIVE_DECL + '\n\n' + PRESSURE_GUIDE + '\n\n' + (stageSection?.text || '') + '\n' + STAGE_GUIDES[0]
+      // 阶段文本重建（stageSection 是 assemble 局部变量——工具作用域不可引用）
+      const stageText = 'Current phase: ' + STAGES[0].name + ' (0/3). Unlocked tools: '
+        + STAGES.slice(0, 2).flatMap((s) => s.tools).join(', ')
+        + ' (next tier pre-unlocked).\n'
+        + 'Phase is self-routed state: we decide when to advance — use a next-tier tool or state that our phase is done.'
+      const guide = START_GUIDE + '\n\n' + PROGRESSIVE_DECL + '\n\n' + PRESSURE_GUIDE + '\n\n' + stageText + '\n' + STAGE_GUIDES[0]
       try {
         currentAgent()?.inbox.append('next-step', {
           id: 'bootstrap-' + Date.now(),
