@@ -62,17 +62,24 @@ const PRESSURE_GUIDE =
  * 阶段化渐进解锁（v0.7）：按任务阶段门控工具。
  */
 const STAGES = [
-  { name: '了解/对齐', tools: ['read', 'glob', 'grep', 'web_search', 'ask_user_question'] },
-  { name: '拟合方案', tools: ['todo_write', 'exit_plan_mode'] },
-  { name: '开发', tools: ['write', 'edit', 'str_replace_editor'] },
+  { name: '了解/对齐', tools: ['read', 'glob', 'grep', 'web_search', 'ask_user_question', 'engram_recall', 'engram_verify', 'engram_respond'] },
+  { name: '拟合方案', tools: ['todo_write', 'exit_plan_mode', 'engram_search', 'engram_open'] },
+  { name: '开发', tools: ['write', 'edit', 'str_replace_editor', 'engram_store', 'engram_link'] },
   { name: '验证', tools: ['pwsh', 'bash', 'read_image', 'job_list', 'job_output', 'job_kill'] },
+]
+
+/** restrict 安全名单（仅确定 global 的工具；engram/scope-local 不受 restrict 门控）。 */
+const GLOBAL_SAFE = [
+  'read', 'write', 'edit', 'glob', 'grep', 'web_search', 'ask_user_question',
+  'todo_write', 'exit_plan_mode', 'pwsh', 'bash', 'read_image',
+  'job_list', 'job_output', 'job_kill', 'str_replace_editor',
 ]
 
 /** 阶段解锁指引（注入到用户消息后）。 */
 const STAGE_GUIDES = [
-  '\n\nPhase: understanding. Tools unlocked: read/glob/grep/web_search/ask_user_question. Align on the task: read context, clarify ambiguity. To unlock the planning phase, state our understanding and open a plan (todo_write).',
-  '\n\nPhase: planning. Tools added: todo_write. Fit a concrete approach: decide the path, split steps, lock the plan. To unlock development (write/edit/str_replace_editor), complete the plan and write our first todo.',
-  '\n\nPhase: development. Tools added: write/edit/str_replace_editor. Produce directly, one action per step. To unlock verification (pwsh/bash/read_image), finish the deliverable and say so.',
+  '\n\nPhase: understanding. Tools: read/glob/grep/web_search/ask_user_question + memory & knowledge (engram_recall to wake prior work, engram_verify/engram_respond to ground claims). Align on the task: recall, read, clarify. To unlock planning, state our understanding and open a plan (todo_write).',
+  '\n\nPhase: planning. Tools added: todo_write + memory review (engram_search/engram_open). Fit a concrete approach: consult what we know, decide the path, split steps, lock the plan. To unlock development (write/edit/str_replace_editor), complete the plan and write our first todo.',
+  '\n\nPhase: development. Tools added: write/edit/str_replace_editor + memory write (engram_store/engram_link to persist decisions). Produce directly, one action per step. To unlock verification (pwsh/bash/read_image), finish the deliverable and say so.',
   '\n\nPhase: verification. Tools added: pwsh/bash/read_image/jobs. Verify what we built: run it, inspect output, fix what fails. When verified, deliver — the full catalog opens.',
 ]
 
@@ -116,7 +123,7 @@ export function apply(ctx, config) {
       const toolsSvc = agent.ctx.get('tools')
       if (toolsSvc && typeof toolsSvc.restrict === 'function') {
         const allowed = new Set(STAGES.slice(0, stage + 1).flatMap((s) => s.tools))
-        toolsSvc.restrict({ allow: [...allowed] })
+        toolsSvc.restrict({ allow: [...allowed].filter((t) => GLOBAL_SAFE.includes(t)) })
       }
     } catch { /* scope-local names in allow: skip restrict, keep full catalog */ }
   }
