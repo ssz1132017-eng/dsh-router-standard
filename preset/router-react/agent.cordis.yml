@@ -89,6 +89,10 @@
 # unavailable" while these controls sat in the catalog. The registry is keyed by
 # owning agent anyway, so one host instance serves every session. What a preset
 # chooses is whether its agent can collect and stop background work at all.
+# RL 接口核心工具（v0.4）：str_replace_editor——首轮双工具之一。
+- id: tool-str-replace-editor
+  name: '@deepseek-ai/dsh-tool-str-replace-editor'
+
 - id: tool-jobs
   name: '@deepseek-ai/dsh-tool-jobs'
 
