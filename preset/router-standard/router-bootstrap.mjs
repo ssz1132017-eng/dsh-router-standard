@@ -92,6 +92,14 @@ const GLOBAL_SAFE = [
 /** 开局引导：每个会话只注入一次；之后阶段由 agent 自主路由，不再注入任何指引。 */
 const START_GUIDE =
   '\n\nBootstrap (once per session): this is a progressive tool-unlock session — tools open in phases like a leveling game. '
+
+const STAGE_GUIDES = [
+  'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond). Complete understanding, then call phase_advance to enter planning.',
+  'Phase: planning. Unlocked: todo_write/exit_plan_mode + memory review (engram_search/open). Lock the plan, then call phase_advance to enter development.',
+  'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link). Produce, then call phase_advance to enter verification.',
+  'Phase: verification. Unlocked: pwsh/bash/read_image/jobs. Verify and deliver — the full catalog opens.',
+]
+
   + 'Unlock order: understanding (read/glob/grep/web_search/ask_user_question) → planning (todo_write) → development (write/edit/str_replace_editor) → verification (pwsh/bash/read_image/jobs). '
   + 'Your current phase and unlocked tools are always visible in the system prompt (router-stage section) and via dev_router_status. '
   + 'You route yourself: to advance, use a tool of the next tier (it is pre-unlocked for you to try), or state that the current phase is done. '
