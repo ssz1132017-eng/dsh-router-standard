@@ -217,22 +217,18 @@ export function apply(ctx, config) {
         + ' (next tier pre-unlocked).\nPhase is self-routed state: you decide when to advance — '
         + 'use a next-tier tool or state that the current phase is done. dev_router_status shows the live state.',
     }
-    // 首轮尽量纯 RL：只有 RL 句 + code-only（run_code 规则）；披露声明/泄压引导/
-    // 阶段声明全部后注入（Bootstrap 消息，第一步可见）——开头最接近 RL 接口。
-    const codeOnly = (assembled.sections || []).find((s) => s?.name === 'tools:code-only')
-    const baseSections = [
-      ...(planSection ? [planSection] : []),
-      ...(codeOnly ? [codeOnly] : []),
-      { name: 'router-persona', text: RL_PERSONA, order: 0 },
-    ]
+    const baseSections = planSection
+      ? [planSection, { name: 'router-persona', text: RL_PERSONA + '\n\n' + PROGRESSIVE_DECL + PRESSURE_GUIDE, order: 0 }, stageSection]
+      : [{ name: 'router-persona', text: RL_PERSONA + '\n\n' + PROGRESSIVE_DECL + PRESSURE_GUIDE, order: 0 }, stageSection]
 
     if (!promoted) {
       applyStageRestrict(agent, stage)
       const available = new Set(assembled.tools.map((tool) => tool.name))
       // PTC 底座：code mode 下工具面 = run_code + SDK 阶段化
       if (available.has('run_code')) {
-        // 首轮纯 RL：不替换 SDK 段（SDK 细节后注入——Bootstrap/阶段提示带）
-        return { ...assembled, sections: baseSections, contexts: [] }
+        const staged = buildStagedSdk(baseSections, stage)
+        const finalSections = staged ? baseSections.map((s) => (s.name === 'tools:sdk' ? staged : s)) : baseSections
+        return { ...assembled, sections: finalSections, contexts: [] }
       }
       const shell = available.has('pwsh') ? 'pwsh' : available.has('bash') ? 'bash' : null
       // 渐进披露下 shell 是阶段工具（验证阶段解锁）——缺失是正常态，放行。
@@ -271,7 +267,7 @@ export function apply(ctx, config) {
     if (!bootstrapInjected.has(sid)) {
       bootstrapInjected.add(sid)
       const stage = ensureStage()[sid]?.stage ?? 0
-      const guide = START_GUIDE + PRESSURE_GUIDE + '\n' + STAGE_GUIDES[Math.min(stage, STAGE_GUIDES.length - 1)]
+      const guide = START_GUIDE + '\n' + STAGE_GUIDES[Math.min(stage, STAGE_GUIDES.length - 1)]
       const snap = {
         id: 'bootstrap-' + Date.now(),
         role: 'user',
