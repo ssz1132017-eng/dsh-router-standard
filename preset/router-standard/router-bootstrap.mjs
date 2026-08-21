@@ -222,26 +222,16 @@ export function apply(ctx, config) {
         + ' (next tier pre-unlocked).\nPhase is self-routed state: you decide when to advance — '
         + 'use a next-tier tool or state that the current phase is done. dev_router_status shows the live state.',
     }
+    // 首轮纯 RL（稳定 we）：只有 RL 句（+ plan 段）；声明/泄压/阶段声明全部在
+    // phase_begin 确认后的 Bootstrap 注入（路径已承诺，不破坏 we 轨迹）。
     const baseSections = planSection
-      ? [planSection, { name: 'router-persona', text: RL_PERSONA + '\n\n' + PROGRESSIVE_DECL + PRESSURE_GUIDE, order: 0 }, stageSection]
-      : [{ name: 'router-persona', text: RL_PERSONA + '\n\n' + PROGRESSIVE_DECL + PRESSURE_GUIDE, order: 0 }, stageSection]
+      ? [planSection, { name: 'router-persona', text: RL_PERSONA, order: 0 }]
+      : [{ name: 'router-persona', text: RL_PERSONA, order: 0 }]
 
     if (!promoted) {
-      applyStageRestrict(agent, stage)
-      const available = new Set(assembled.tools.map((tool) => tool.name))
-      // PTC 底座：code mode 下工具面 = run_code + SDK 阶段化
-      if (available.has('run_code')) {
-        const staged = buildStagedSdk(baseSections, stage)
-        const finalSections = staged ? baseSections.map((s) => (s.name === 'tools:sdk' ? staged : s)) : baseSections
-        return { ...assembled, sections: finalSections, contexts: [] }
-      }
-      const shell = available.has('pwsh') ? 'pwsh' : available.has('bash') ? 'bash' : null
-      // 渐进披露下 shell 是阶段工具（验证阶段解锁）——缺失是正常态，放行。
-      if (shell === null) {
-        return { ...assembled, sections: baseSections, contexts: [] }
-      }
-      const core = new Set(['str_replace_editor', shell, 'tools_catalog', 'tools_help'])
-      return { ...assembled, sections: baseSections, contexts: [], tools: assembled.tools.filter((tool) => core.has(tool.name)) }
+      // 首轮：无 restrict（phase_begin 可见）+ 工具面只留 phase_begin（确认开启）
+      // ——纯 RL 条件（稳定 we）；确认后才注入/解锁/切 PTC。
+      return { ...assembled, sections: baseSections, contexts: [], tools: assembled.tools.filter((tool) => tool.name === 'phase_begin') }
     }
 
     // promoted：官方完整 sections 回流 + persona 保持 RL 句 + 全目录（阶段 restrict 保留到验证完成）
@@ -300,6 +290,44 @@ export function apply(ctx, config) {
       parameters: toJsonSchema(tool.parameters),
     }))
   }
+
+  // ── 确认开启（游戏化）：phase_begin——首轮唯一工具 ───────────────────
+  registerTool({
+    name: 'phase_begin',
+    description: '确认开启本次会话：开始渐进式工具解锁（注入机制声明 + 解锁阶段 0 工具 + 切换 Code Mode）。调用即开始。',
+    parameters: {},
+    output: {
+      schema: { type: 'string' },
+      render: (_a, v) => [{ type: 'text', text: String(v) }],
+    },
+    async execute() {
+      const session = currentSession()
+      if (session === undefined) return 'no agent session'
+      const sid = session.id
+      const state = ensureStage()
+      state[sid] = state[sid] ?? { stage: 0, guided: false }
+      state[sid].guided = true
+      saveStageState()
+      // 解锁阶段 0（+ 预放一档）
+      applyStageRestrict(currentAgent(), 0)
+      // 切 PTC（code mode——后续 run_code + 阶段化 SDK）
+      try {
+        const toolsSvc = currentAgent()?.ctx?.get('tools')
+        if (toolsSvc && typeof toolsSvc.presentAs === 'function') toolsSvc.presentAs('code')
+      } catch { /* presentation already declared: ignore */ }
+      // 注入 Bootstrap（声明 + 泄压 + 阶段 0 指引）
+      const guide = START_GUIDE + '\n\n' + PROGRESSIVE_DECL + '\n\n' + PRESSURE_GUIDE + '\n\n' + (stageSection?.text || '') + '\n' + STAGE_GUIDES[0]
+      try {
+        currentAgent()?.inbox.append('next-step', {
+          id: 'bootstrap-' + Date.now(),
+          role: 'user',
+          source: { kind: 'plugin', plugin: 'router-bootstrap' },
+          content: [{ type: 'text', text: guide }],
+        })
+      } catch { /* skip */ }
+      return 'session started: phase 0 (了解/对齐) unlocked — read/glob/grep/web_search/ask_user_question + engram memory; next-tier pre-unlocked. Bootstrap injected.'
+    },
+  })
 
   registerTool({
     name: 'phase_advance',
