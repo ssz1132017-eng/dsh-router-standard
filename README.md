@@ -125,7 +125,7 @@ version of that external routing.
 
 ## Usage
 
-**Two presets** (v0.2.0): install one or both under `~/.dsh/.agent-presets/`:
+**Three presets** (v0.3.0): install one or more under `~/.dsh/.agent-presets/`:
 
 ```powershell
 # 标准路由预设（RL 接口还原，默认推荐）
@@ -135,13 +135,39 @@ Copy-Item -Recurse .\preset\router-standard $target
 # spec 路由预设（深度思考优先）
 $target = Join-Path $env:USERPROFILE '.dsh\.agent-presets\router-spec'
 Copy-Item -Recurse .\preset\router-spec $target
-# NOTE: installed copies must keep unique module filenames
-# (the loader caches ESM modules by URL; do not overwrite in place)
+
+# Pro 路由预设（V4 Pro 测量最优，router-pro）
+$target = Join-Path $env:USERPROFILE '.dsh\.agent-presets\router-pro'
+Copy-Item -Recurse .\preset\router-pro $target
 ```
 
-Restart DSH, start a new session, pick **Router Standard (experimental)**
-(RL-interface, think-act loops) or **Router Spec (experimental)**
-(deep-think-first, the long first-turn chain is the point).
+**免重启安装（推荐）**：装好 [dsh-super-injector](https://github.com/yjh051108/dsh-super-injector)
+后（见套件 `scripts/install-injector.ps1`），改预设代码不再需要换文件名/重启：
+
+```
+dev_reload_preset router-standard   # 预设热更新：?v=N query 绕 ESM 缓存，新会话立即用新代码
+```
+
+**注意事项（实测血泪）**：
+
+1. **ESM 缓存**：loader 按 URL 缓存模块——原地覆盖文件内容不生效（改代码必须
+   `dev_reload_preset` 或换文件名）。
+2. **首次会话必须新开**：路由模式在首个请求锁定（路径承诺），中途切 GUI 模型/
+   改配置不影响已运行会话。
+3. **子代理不路由**：`parentSession` 会话跳过路由层（社区 #5 修复），shell-less
+   子代理不再崩溃。
+4. **引导注入通道**（v0.3.0）：近场引导走 `agent/pre-step`，每个真实用户消息
+   注入一条（weak 模式）；rc.6 起 `session/event` 在 standing scope 收不到事件，
+   旧版本引导是死的。
+5. **首轮真实分类**（issue #3/#13）：首轮路由读 `agent/inbox/claimed` 的原始
+   消息文本并经 `classifyTask` 分类——首轮即真实 band（不再 weak 兜底）。
+6. **自举卸载**：`dev_uninject_plugin --self=true` 可卸载注入器自身（保留
+   装配链，重启自动恢复）——用于验证安装闭环。
+
+Restart DSH (or install via the suite script for zero-touch), start a new
+session, pick **Router Standard (experimental)** (RL-interface, think-act
+loops), **Router Spec (experimental)** (deep-think-first, the long first-turn
+chain is the point) or **Router Pro** (V4 Pro measured optimum).
 
 - `dev_router_status` — current mode, band, persona, core tools, override state
 - `dev_router_mode <spec|weak|mixed|react|0-100|0.0-1.0|auto>` — explicit mode
