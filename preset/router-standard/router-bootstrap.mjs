@@ -256,7 +256,7 @@ export function apply(ctx, config) {
     // Bootstrap once：第一个真实用户消息前注入（阶段机制声明）
     if (!bootstrapInjected.has(sid)) {
       bootstrapInjected.add(sid)
-      const stage = stageOf.get(sid) ?? 0
+      const stage = ensureStage()[sid]?.stage ?? 0
       const guide = START_GUIDE + '\n' + STAGE_GUIDES[Math.min(stage, STAGE_GUIDES.length - 1)]
       try {
         agent.inbox.append('next-step', {
@@ -301,12 +301,15 @@ export function apply(ctx, config) {
       const session = currentSession()
       if (session === undefined) return 'no agent session'
       const sid = session.id
-      const stage = stageOf.get(sid) ?? 0
+      const stage = ensureStage()[sid]?.stage ?? 0
       if (stage >= STAGES.length - 1) {
         return 'already at the last stage (' + STAGES[stage].name + '); full catalog is open'
       }
       const next = stage + 1
-      stageOf.set(sid, next)
+      const state = ensureStage()
+      state[sid] = state[sid] ?? { stage: 0, guided: false }
+      state[sid].stage = next
+      saveStageState()
       applyStageRestrict(currentAgent(), next)
       const guide = STAGE_GUIDES[Math.min(next, STAGE_GUIDES.length - 1)]
       try {
