@@ -13,7 +13,25 @@
 >
 > 📄 完整勘误声明：[docs/statement.md](docs/statement.md) ｜ 道歉函：[docs/apology.md](docs/apology.md)
 
-**Task-aware reasoning-mode router for DeepSeek Harness.** One preset, two
+---
+
+## 当前状态（v0.4.0 / v1.8.0，2026-08-22）
+
+**Router Standard 已进入「渐进式披露套装」研发线**（五轮真实会话实测驱动）：
+
+- **渐进披露**：四阶段解锁 + 两档预放（阶段 0 即用 write/edit）+ 直达语义（调用哪档工具就跳到哪档）+ 交付全量开放；
+- **二级注册表**：`tools_catalog`（全量索引 + 阶段标记 + 参数名/类型/上限速览）/ `tools_help`（完整 schema）；
+- **PTC 底座**：run_code 阶段化 SDK（39K → 阶段可见签名），工具面注意力税大幅下降；
+- **页面验证内置**：`dev_page_check` = 截图 + DOM smoke + **console/pageerror/title/selector/scale**；`{js:…}` 模式 = 本地 JS 引擎（语法检查+纯逻辑单测，零外部 node 依赖）；
+- **描述 ⇄ 行为对齐**：`presentation=code|native` 自检、阶段文案只说真话、平台事实（win32 仅 pwsh、node 入 PATH）；
+- **压力感应**：真实事件通道 + 模型自适应 + 自检信号语义清楚（不是停手命令）。
+
+配套预设：**router-react（v17）/ router-spec（v10）**（基于标准模式的两大执行预设，均支持 v4-flash-vision-exp 首轮读图——`read_image` 首轮面）。router-pro 线已退役删除。
+完整演进：见 [CHANGELOG.md](CHANGELOG.md) 与 [docs/STANDARD-PLAN.md](docs/STANDARD-PLAN.md)。
+
+---
+
+**【历史文档 · v0.3 时代】** Task-aware reasoning-mode router for DeepSeek Harness. One preset, two
 **routing modes** (v0.2.0 naming), plus the measured three-band axis behind them:
 
 | routing mode | first request | thinking shape |

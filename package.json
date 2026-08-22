@@ -1,7 +1,7 @@
 {
   "name": "dsh-router-standard",
-  "version": "0.3.0",
-  "description": "Task-aware reasoning-mode router for DeepSeek Harness: classified persona + full prompt sections, first-turn core tool surface, near-field weak-mode guides, agent-visible tuning.",
+  "version": "0.4.0",
+  "description": "Progressive tool disclosure router suite for DeepSeek Harness: stage-gated tool unlock + two-level catalog, PTC (run_code) base with staged SDK, memory/knowledge fusion, pressure sensing, built-in page verification (headless screenshot + console + selector + local JS engine).",
   "private": false,
   "license": "MIT",
   "type": "module",

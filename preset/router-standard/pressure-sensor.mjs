@@ -74,8 +74,11 @@ export function apply(ctx, config = {}) {
     const scale = /flash/i.test(model) ? FLASH_SCALE : 1
     const triggers = []
     if (st.stepChars > charsPerStep * scale) triggers.push(`deep-reasoning ${st.stepChars} chars`)
-    if (st.loopHits >= Math.max(2, Math.round(loopHits * scale))) triggers.push(`loop-pattern x${st.loopHits}`)
+    // v1.8 降噪：loop-pattern 仅当"连续无行动"同时成立才提醒——干活中说的话带犹豫词不打扰，
+    // 真正"想不动手"的循环才提示（五轮实弹：提醒与开发任务混在一起干扰注意力）。
     st.noToolSteps += 1
+    const loopActive = st.loopHits >= Math.max(2, Math.round(loopHits * scale))
+    if (loopActive && st.noToolSteps >= 2) triggers.push(`loop-pattern x${st.loopHits} (with ${st.noToolSteps} steps no action)`)
     if (st.noToolSteps >= noToolSteps) triggers.push(`${st.noToolSteps} steps no action`)
 
     // 步推进（v1.5 冷却 2→3 步：反馈"提醒与开发任务混在一起干扰注意力"——降噪但保留捕获）
