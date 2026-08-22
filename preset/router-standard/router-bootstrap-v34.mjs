@@ -377,8 +377,13 @@ export function pageFail(message) {
 
 /** 页面验证执行体（headless Chrome + 新鲜 profile + screenshot + DOM smoke；硬超时杀树）。
  *  ctx 只需 subprocess 服务（ctx.get('subprocess')）。返回 lossless-JSON 概览，所有分支形状统一。
- *  v1.9：包装层——js 模式直通；浏览器路径一次失败（超时/空 DOM）自动重试一次（双倍虚拟时间 +
- *  1.5×超时、全新 profile），吸附 3D/WebGL 首加载偶发（六轮实弹"路径级不可复现"的根因修复）。 */
+ *  v1.9.1：CPU/进程安全三防（用户实弹"后台挂超多 chrome、CPU 爆掉"）——
+ *   ① 单飞锁：同时只允许一个页面检查（并发只返回 busy，不再堆进程）；
+ *   ② 结束/超时后强制 taskkill /F /T 树杀（subprocess 默认温和 kill 杀不死无窗口的 headless chrome，
+ *      孤儿 renderer/GPU 进程会累积满载 CPU）；
+ *   ③ 自动重试改为 opt-in（retry: true）——默认不重试，避免 3D 页 SwiftShader 双倍满载。 */
+const PAGE_BUSY_KEY = Symbol.for('router-standard.pageCheckBusy')
+
 export async function pageCheckRun(ctx, args) {
   if (args?.js !== undefined && args?.js !== null && String(args.js).trim() !== '') {
     const r = runSandboxJs(String(args.js))
@@ -388,16 +393,40 @@ export async function pageCheckRun(ctx, args) {
       jsOutput: r.output, jsError: r.error,
     }
   }
-  const first = await pageCheckRunOnce(ctx, args)
-  if (first.ok) return first
-  // 仅"可重试型"失败才重试：硬错误（无浏览器/无 subprocess/参数错/无法建 profile）带 settleError 且未超时 → 不重试
-  if (first.settleError && !first.timedOut) return first
-  const boost = {
-    ...args,
-    virtualTimeMs: Math.min(60000, Math.floor(Number(args?.virtualTimeMs || 8000) * 2)),
-    timeoutMs: Math.min(240000, Math.round(Number(args?.timeoutMs || 20000) * 1.5)),
+  // 单飞锁：本进程同时只跑一个页面检查（跨 preset 代共享，防多会话/并发堆积）
+  const busySlot = globalThis[PAGE_BUSY_KEY] ?? (globalThis[PAGE_BUSY_KEY] = { v: false })
+  if (busySlot.v) return pageFail('another page-check is already running (single-flight); retry after it settles')
+  busySlot.v = true
+  try {
+    const first = await pageCheckRunOnce(ctx, args)
+    if (first.ok) return first
+    // 仅"可重试型"失败才重试（显式 retry:true）：硬错误带 settleError 且未超时 → 不重试
+    if (args?.retry !== true || (first.settleError && !first.timedOut)) return first
+    const boost = {
+      ...args,
+      virtualTimeMs: Math.min(60000, Math.floor(Number(args?.virtualTimeMs || 8000) * 2)),
+      timeoutMs: Math.min(240000, Math.round(Number(args?.timeoutMs || 20000) * 1.5)),
+    }
+    return await pageCheckRunOnce(ctx, boost)
+  } finally {
+    busySlot.v = false
   }
-  return await pageCheckRunOnce(ctx, boost)
+}
+
+/** 强制 tree-kill 兜底（v1.9.1）：taskkill /F /T 按主 pid 杀整棵 chrome 树——subprocess 的
+ *  温和 kill（无 /F）对无窗口的 headless chrome 无效，这是"孤儿进程累积"的根因。fire-and-forget。 */
+function forceTreeKill(ctx, pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return
+  try {
+    const sub = ctx?.get?.('subprocess')
+    if (!sub || typeof sub.spawn !== 'function') return
+    sub.spawn({
+      argv: ['taskkill', '/F', '/T', '/PID', String(pid)],
+      cwd: process.cwd(),
+      stdio: { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' },
+      graceMs: 1000,
+    })
+  } catch { /* 兜底失败不阻塞 */ }
 }
 
 /** 单次执行体（无重试语义；参数与 pageCheckRun 相同）。 */
@@ -423,7 +452,7 @@ async function pageCheckRunOnce(ctx, args) {
   if (!sub || typeof sub.spawn !== 'function') return pageFail('no subprocess service in scope')
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
-  let outcome; let stdoutReader; let stderrReader; let settleError = ''
+  let outcome; let stdoutReader; let stderrReader; let settleError = ''; let childPid = -1
   try {
     const handle = sub.spawn({
       argv: [
@@ -448,13 +477,18 @@ async function pageCheckRunOnce(ctx, args) {
       graceMs: 2000,
       signal: ac.signal,
     })
+    childPid = handle?.pid
     outcome = await handle.done
     const collected = handle.collected
     stdoutReader = collected?.stdout
     stderrReader = collected?.stderr
   } catch (e) {
     settleError = (e && e.message) || String(e)
-  } finally { clearTimeout(timer) }
+  } finally {
+    clearTimeout(timer)
+    // v1.9.1 强制树杀兜底：subprocess 温和 kill 杀不死无窗口 chrome——无论成败都按主 pid /F /T 清理
+    forceTreeKill(ctx, childPid)
+  }
   const timedOut = ac.signal.aborted
   const readTail = (reader, max) => {
     try {
@@ -866,6 +900,7 @@ export function apply(ctx, config) {
       virtualTimeMs: { type: 'number', description: '虚拟时间预算（默认 8000；动画页可加大）' },
       domChars: { type: 'number', description: 'DOM 片段截取字符数（默认 8000，剥离 style/script 后；上限 30000）' },
       selector: { type: 'string', description: '#id / .class / tagname：提取该元素文本（用于绕过截断读取数值）' },
+      retry: { type: 'boolean', description: '首次失败（超时/空 DOM）时重试一次（双倍虚拟时间+1.5×超时）。默认 false——避免 3D 页软渲染双重满载 CPU' },
     },
     output: { schema: {
       type: 'object',
@@ -1015,6 +1050,7 @@ export function apply(ctx, config) {
         timeoutMs: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' },
         scale: { type: 'number' }, virtualTimeMs: { type: 'number' }, domChars: { type: 'number' },
         selector: { type: 'string', description: '#id / .class / tagname 提取文本' },
+        retry: { type: 'boolean', description: '失败重试一次（默认 false）' },
       },
       output: {
         schema: {

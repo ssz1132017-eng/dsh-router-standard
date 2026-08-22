@@ -244,6 +244,19 @@ test('normalizePageUrl: 裸路径/中文路径/相对路径自动转 file:// (v1
   assert.equal(normalizePageUrl('ftp://x'), 'ftp://x') // 非 http/file scheme 原样 → pageCheckRun 拒绝
 })
 
+test('pageCheckRun: 单飞锁（v1.9.1——并发只跑一个，杜绝 chrome 堆积）', async () => {
+  const KEY = Symbol.for('router-standard.pageCheckBusy')
+  const saved = globalThis[KEY]
+  globalThis[KEY] = { v: true }
+  try {
+    const busy = await pageCheckRun({ get: () => ({ spawn() { throw new Error('must not spawn when busy') } }) }, { url: 'http://127.0.0.1:9/' })
+    assert.equal(busy.ok, false)
+    assert.match(busy.settleError, /single-flight/)
+  } finally {
+    if (saved === undefined) delete globalThis[KEY]
+    else globalThis[KEY] = saved
+  }
+})
 test('pageCheckRun: URL 校验 + fake subprocess smoke (v1.5 → v1.6.1 全分支形状)', async () => {
   // 输出契约形状断言（自写子集校验器，镜像 dsh-tools 的 output 校验：7 字段必需、类型、无额外属性）
   const assertPageShape = (v) => {
