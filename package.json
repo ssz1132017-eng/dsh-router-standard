@@ -1,6 +1,6 @@
 {
   "name": "dsh-router-standard",
-  "version": "0.4.0",
+  "version": "0.3.0",
   "description": "Progressive tool disclosure router suite for DeepSeek Harness: stage-gated tool unlock + two-level catalog, PTC (run_code) base with staged SDK, memory/knowledge fusion, pressure sensing, built-in page verification (headless screenshot + console + selector + local JS engine).",
   "private": false,
   "license": "MIT",
@@ -8,7 +8,8 @@
   "files": [
     "preset/",
     "docs/",
-    "README.md",\n    "CHANGELOG.md",
+    "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "NOTICE",
     "router.test.mjs",

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 (v1.8.0) — Progressive disclosure suite, release line
+## v1.8.0 — Progressive disclosure suite（研发线，未发布）
 
 Self-optimization rounds v1.3 → v1.8 (five real-session feedback loops, Gargantua / suspension-workstation builds):
 
