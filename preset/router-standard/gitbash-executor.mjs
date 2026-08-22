@@ -87,6 +87,7 @@ export function apply(ctx, config = {}) {
       const timedOut = ac.signal.aborted
       return {
         exitCode: Number(outcome?.exitCode ?? outcome?.code ?? -1),
+        signal: outcome?.signal ?? null,
         timedOut,
         aborted: spawnError !== '' ? true : ac.signal.aborted && !timedOut,
         timeoutMs: spec.timeoutMs,

@@ -1,5 +1,5 @@
 /**
- * router-bootstrap (standard v1.6.0): progressive tool disclosure — game-style timeline.
+ * router-bootstrap (standard v1.13.0): progressive tool disclosure — game-style timeline.
  *
  * 时序（用户定稿）：
  *   T0 首轮 = 纯 RL 句（46 字符）+ phase_begin（唯一确认工具，native；稳定 we）
@@ -41,8 +41,17 @@ function toJsonSchema(spec) {
 }
 
 const RL_PERSONA = 'You are a helpful software engineer assistant.'
+const ROUTER_VERSION = 'v1.13.0'
+/* 描述单源（v1.13 审计修复）：main 注册与 own-layer shim 读同一份，杜绝双份漂移。 */
+const DESC = {
+  toolsCatalog: '渐进式披露一级：全部工具（名称 + 一行摘要 + 阶段标记）。query 关键词过滤；domain 域浏览。',
+  toolsHelp: '渐进式披露二级：单个工具的完整 schema（参数/必需/描述）。精准调用前先查。',
+  phaseAdvance: '闯关推进：声明当前阶段已完成，进入下一阶段（解锁新工具 + 阶段提示）。逐级推进（一次一级，不跳级）；预放工具调用会直达其档，不需要 phase_advance。仅在明确完成本阶段工作时调用。进入验证/交付阶段后：先 delivery_check(file[, url], evidence)，PASS 才可宣告完成。',
+  routerStatus: 'Show the current routing state (phase, band, persona, unlocked tools, override). No arguments — call as tools["dev_router_status"]({}).',
+  deliveryCheck: '交付 gate（阶段出口契约）：校验交付物 存在/非空/UTF-8 + 可选 headless smoke + 通用证据清单（evidence，任意交付物适用；页面/图像类必须含已复核的视觉证据，数量由任务自定）；输出 PASS/FAIL。⚠️ 全部 PASS 才允许宣告完成，任一 FAIL 必须修复后重跑，不允许绕过。',
+}
 const PROGRESSIVE_DECL =
-  'We hold a full tool registry (48+ items), revealed in phases. tools_catalog lists every tool (name + summary + [phase mark] + param names); tools_help <name> returns any tool\'s complete spec. We query on demand and call precisely. '
+  'We hold a full tool registry (see tools_catalog for the live count), revealed in phases. tools_catalog lists every tool (name + summary + [phase mark] + param names); tools_help <name> returns any tool\'s complete spec. We query on demand and call precisely. '
   + 'Inside run_code the meta tools are bound at phase_begin: tools_catalog/tools_help (secondary disclosure), phase_advance/dev_router_status/dev_router_mode (level-up & self-check), dev_reload_preset_live (live reload), dev_page_check (headless screenshot + DOM smoke). '
   + 'Long-running goals carry goal tools: get_goal / create_goal / update_goal (read before updating, mark complete only when actually achieved). '
   + 'Tool signatures are NOT uniform: before the first use of any tool this session, read its parameter names via tools_catalog or tools_help (or the SDK type inside run_code) — never guess. Runtime caps (read lines, search count, output bytes) are enforced at call time — check tools_help before big calls. '
@@ -93,7 +102,7 @@ const STAGE_GUIDES = [
   'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond) + pre-unlocked write/edit (two tiers ahead — calling one jumps straight there). Ground first: recall, verify claims, then read/ask. Design or build intent already unlocks development tools — no routing ceremony needed. Runtime caps (read lines, output bytes) are enforced at call time — check tools_help before big calls. Complete when: the task requirements and available evidence are stated clearly. Then work (write is already unlocked).',
   'Phase: planning. Unlocked: todo_write/exit_plan_mode + memory review (engram_search/open) + pre-unlocked write/edit/pwsh. Lock the plan, then work — calling a pre-unlocked tool jumps to its phase; phase_advance advances one stage (never skips). Complete when: the plan is recorded and decisions are locked. Then develop.',
   'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link) + pre-unlocked verification tools. Re-read before re-edit: a file changed since your last read must be read again first (editor enforces a fresh read). write/edit results carry the FULL before/after text — take only path/operation and inspect changed lines with grep/read; never print a whole write/edit result. Cross-language escaping: run_code programs are JS — PowerShell "${env:V}" is template-interpolated by JS; build such strings with single quotes or concatenation first. Complete when: the artifact exists and passes its own self-check (loads, no console errors, key values sane). Then phase_advance to verification.',
-  'Phase: verification → delivery gate. Unlocked: pwsh/bash/read_image/jobs + dev_page_check + delivery_check (meta). Shell: Windows: bash = Git Bash (MSYS, GNU) — first-class shell (pwsh remains for PowerShell-native needs); POSIX: bash. Git Bash needs full access to start (MSYS cannot run under a restricted token) — if it fails at workspace-write, do the documented one-shot escalation, never bypass the sandbox. Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first. **Complete only when: delivery_check(file[, url]) returns PASS** — artifact exists / non-empty / UTF-8, headless smoke OK (title + no console errors), and the rendered result reviewed via read_image. Until delivery_check passes, do NOT report the task as delivered — any FAIL: fix and re-run. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
+  'Phase: verification → delivery gate. Unlocked: pwsh/bash/read_image/jobs + dev_page_check + delivery_check (meta). Shell: Windows: bash = Git Bash (MSYS, GNU) — first-class shell (pwsh remains for PowerShell-native needs); POSIX: bash. Git Bash needs full access to start (MSYS cannot run under a restricted token) — if it fails at workspace-write, do the documented one-shot escalation, never bypass the sandbox. Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first. **Evidence gate: delivery_check requires an evidence manifest appropriate to the artifact** — text/code: read or grep assertions, or dev_page_check({js}) unit tests (kind=text/test); commands: real stdout summary (kind=run); pages/3D/images: dev_page_check multi-view screenshots + read_image review each (kind=page/image, reviewed:true; view count is up to the task — 3D usually iso/front/side/top, simple pages 1-2 views). Delivery PASS requires evidence on top of file/UTF-8/headless checks: missing evidence, missing targets, unreviewed visuals, or empty run results → FAIL. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
 ]
 
 /** 阶段文本（we-form——you-form 是 let me 吸引子）。
@@ -107,7 +116,7 @@ function stageSummary(stage) {
 }
 function stageText(stage) {
   const s = stageSummary(stage)
-  const delivery = stage >= STAGES.length - 1 ? '\nDelivery: restrict released — full catalog open (all registered tools).' : ''
+  const delivery = stage >= STAGES.length - 1 ? '\nDelivery: restrict released — full catalog open (all registered tools).\nDelivery evidence gate: provide an evidence manifest (kind by artifact). Visual/3D tasks: capture views + read_image review; no fixed view count.' : ''
   return 'Current phase: ' + s.name + ' (' + s.stage + '/3). Callable now: ' + s.unlocked.join(', ')
     + (delivery || '\nNot yet callable (until delivery): every other registered tool stays locked — and until the delivery phase passes delivery_check, do NOT declare the task delivered. Delivery is the gate, not a progress label.')
     + '\nStage guide: ' + (STAGE_GUIDES[stage] || '')
@@ -187,6 +196,18 @@ function registryFullIndex(toolsSvc, scope) {
         }
         if (def) return def
       }
+      /* host 兜底（v1.13）：run_code 等 host 注入核心工具不在层链——从 registry 视图/原始 schemas 反查 */
+      try {
+        if (typeof toolsSvc?.view === 'function') {
+          const d = toolsSvc.view(scope)?.tools?.get?.(name)
+          if (d) return d
+        }
+        if (typeof toolsSvc?.schemas === 'function') {
+          for (const s of toolsSvc.schemas(scope)) {
+            if ((s?.name || s?.function?.name) === name) return s
+          }
+        }
+      } catch { /* 兜底失败不影响 catalog 行展示 */ }
       return undefined
     }
     return [...names].sort().map((name) => {
@@ -221,7 +242,7 @@ export function runtimeMark(toolsSvc, scope, name) {
 }
 
 /** 运行时真实可调列表（v1.11——status 的 callable 与 SDK 绑定同源）。
- *  只返回"确实绑定在 run_code tools 上"的阶段工具与 meta 工具；其余一律视为交付后。 */
+ *  只返回"确实绑定在 run_code tools 上"的阶段工具、meta 工具与 base 入口（run_code）；其余一律视为交付后。 */
 export function runtimeCallable(toolsSvc, scope) {
   try {
     if (typeof toolsSvc?.view !== 'function') return []
@@ -229,7 +250,7 @@ export function runtimeCallable(toolsSvc, scope) {
     const keys = typeof visible?.keys === 'function' ? visible.keys() : []
     const out = []
     for (const name of keys) {
-      if (name === 'run_code') continue
+      if (name === 'run_code') { out.push('run_code'); continue }
       if (STAGES.some((s) => s.tools.includes(name)) || META_ALL.includes(name)) out.push(name)
     }
     return [...out].sort()
@@ -559,6 +580,36 @@ export async function deliveryCheck(ctx, args) {
       detail: `title=${smoke.title || '(empty)'} dom=${smoke.domText.length} console=${smoke.consoleTail ? 'errors present' : 'clean'}${smoke.timedOut ? ' TIMED_OUT' : ''}`,
     })
   }
+  /* router-lab 实验：通用证据门禁——任何交付物需可信证据；视觉类需 reviewed。 */
+  const ev = args?.evidence
+  if (!ev || !Array.isArray(ev.items) || ev.items.length === 0) {
+    checks.push({ name: 'delivery-evidence', pass: false, detail: 'missing evidence items — provide at least one credible evidence item for this deliverable' })
+  } else {
+    const ALLOWED = new Set(['file','page','image','run','test','text'])
+    const failures = []
+    for (const it of ev.items) {
+      const label = String(it?.label || '').trim()
+      const kind = String(it?.kind || '').trim()
+      if (!label) { failures.push('empty label'); continue }
+      if (!ALLOWED.has(kind)) { failures.push('bad kind: ' + kind); continue }
+      if (kind === 'run' || kind === 'text') {
+        if (!String(it?.result || '').trim()) failures.push(kind + ' evidence without result')
+        continue
+      }
+      const t = String(it?.target || '').trim()
+      if (!t) { failures.push(kind + ' evidence without target'); continue }
+      try {
+        const st = statSync(t)
+        if (!st.isFile() || st.size <= 0) failures.push('target not valid file: ' + t)
+      } catch { failures.push('target missing: ' + t) }
+      if ((kind === 'page' || kind === 'image') && it?.reviewed !== true) failures.push('visual not reviewed: ' + label)
+    }
+    if (args?.url) {
+      const hasReviewedVisual = (ev.items || []).some(it => (String(it?.kind) === 'page' || String(it?.kind) === 'image') && it?.reviewed === true)
+      if (!hasReviewedVisual) failures.push('page deliverable needs at least one reviewed visual evidence')
+    }
+    checks.push({ name: 'delivery-evidence', pass: failures.length === 0, detail: failures.length === 0 ? 'evidence accepted (' + ev.items.length + ' item(s))' : failures.join('; ') })
+  }
   return { ok: checks.every((c) => c.pass), checks }
 }
 
@@ -610,7 +661,8 @@ export function autoAdvance(stage, toolCalls, text) {
 }
 
 /* 阶段状态持久化 */
-const stageFile = () => process.env.DSH_ROUTER_STAGE_FILE || join(process.env.DSH_HOME || homedir(), 'router-standard', 'stages.json')
+const dshHomeForState = () => process.env.DSH_HOME || join(homedir(), '.dsh')
+const stageFile = () => process.env.DSH_ROUTER_STAGE_FILE || join(dshHomeForState(), 'router-standard', 'stages.json')
 let stageCache = null
 function ensureStage() {
   const file = stageFile()
@@ -630,14 +682,14 @@ function loadStageState() {
       }
       return out
     }
-  } catch { /* 不存在/损坏 */ }
+  } catch (e) { if (e && e.code !== 'ENOENT') console.error('[router-bootstrap] loadStageState failed:', e) }
   return {}
 }
 function saveStageState() {
   try {
     mkdirSync(join(stageFile(), '..'), { recursive: true })
     writeFileSync(stageFile(), JSON.stringify({ version: 2, savedAt: new Date().toISOString(), sessions: ensureStage() }, null, 2), 'utf8')
-  } catch { /* 持久化失败不阻塞 */ }
+  } catch (e) { console.error('[router-bootstrap] saveStageState failed:', e) }
 }
 
 /** restrict 交集修复：per-session disposer（释放旧再设新）。 */
@@ -827,7 +879,7 @@ export function apply(ctx, config) {
 
   registerTool({
     name: 'phase_advance',
-    description: '闯关推进：声明当前阶段已完成，进入下一阶段（解锁新工具 + 阶段提示）。逐级推进（一次一级，不跳级）；预放工具调用会直达其档，不需要 phase_advance。仅在明确完成本阶段工作时调用。进入验证/交付阶段后：先 delivery_check(file[, url])，PASS 才可宣告完成。',
+    description: DESC.phaseAdvance,
     parameters: { reason: { type: 'string', description: '推进理由（可选，记录用）' } },
     output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: String(v) }] },
     async execute(args) {
@@ -853,7 +905,7 @@ export function apply(ctx, config) {
 
   registerTool({
     name: 'tools_catalog',
-    description: '渐进式披露一级：全部工具（名称 + 一行摘要）。query 关键词过滤；domain 域浏览。',
+    description: DESC.toolsCatalog,
     parameters: { query: { type: 'string' }, domain: { type: 'string' } },
     output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: String(v) }] },
     async execute(args) {
@@ -881,7 +933,7 @@ export function apply(ctx, config) {
 
   registerTool({
     name: 'tools_help',
-    description: '渐进式披露二级：单个工具的完整 schema（参数/必需/描述）。精准调用前先查。',
+    description: DESC.toolsHelp,
     parameters: { name: { type: 'string', required: true, description: '工具名（tools_catalog 里查到的）' } },
     output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: String(v) }] },
     async execute(args) {
@@ -902,7 +954,7 @@ export function apply(ctx, config) {
 
   registerTool({
     name: 'dev_router_status',
-    description: 'Show the current routing state (phase, band, persona, unlocked tools, override). No arguments — call as tools["dev_router_status"]({}).',
+    description: DESC.routerStatus,
     parameters: {},
     output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: String(v) }] },
     async execute() {
@@ -914,7 +966,7 @@ export function apply(ctx, config) {
       const sum = stageSummary(stage)
       const mode = overrideMap().get(sid) ?? sessionMode(session)
       return [
-        'router=standard (progressive, v1.7.0)',
+        'router=standard (progressive, ' + ROUTER_VERSION + ')',
         'phase=' + sum.name + ' (' + sum.stage + '/3)',
         'callable=[' + runtimeCallable(agent?.ctx?.get?.('tools'), agent).join(', ') + ']', // v1.11 运行时事实（与 SDK 绑定同源）
         'presentation=' + readPresentation(agent),
@@ -985,13 +1037,19 @@ export function apply(ctx, config) {
 
   registerTool({
     name: 'delivery_check',
-    description: '交付 gate（阶段出口契约）：校验交付物文件存在/非空/UTF-8 编码，可选 headless smoke（传 url：加载/标题/console）；输出 PASS/FAIL + 证据清单。⚠️ 全部 PASS 才允许向用户宣告完成交付——任一 FAIL 必须修复后重跑，不允许绕过。',
+    description: DESC.deliveryCheck,
     parameters: {
       file: { type: 'string', required: true, description: '交付物文件路径（绝对路径或工作区相对路径）' },
       url: { type: 'string', description: '可选：交付物为页面时的地址（http(s):// / file:// / 裸路径，自动编码）' },
       timeoutMs: { type: 'number', description: 'smoke 硬超时毫秒（默认 20000）' },
       virtualTimeMs: { type: 'number', description: 'smoke 虚拟时间预算（默认 8000）' },
       retry: { type: 'boolean', description: 'smoke 失败时重试一次（默认 false）' },
+      evidence: { type: 'object', description: '通用证据清单（任意交付物适用；页面/图像类需已复核的视觉证据；数量由任务自定）', properties: {
+        items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+          kind: { type: 'string', enum: ['file','page','image','run','test','text'] },
+          label: { type: 'string' }, target: { type: 'string' }, result: { type: 'string' }, reviewed: { type: 'boolean' },
+        }, required: ['kind', 'label'] } },
+      }, required: ['items'] },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: {
       ok: { type: 'boolean' },
@@ -1034,7 +1092,7 @@ export function apply(ctx, config) {
 
     n += make({
       name: 'tools_catalog',
-      description: '渐进式披露一级：全部工具（名称 + 一行摘要 + 阶段标记）。query 关键词过滤（own-layer shim）。',
+      description: DESC.toolsCatalog,
       parameters: { query: { type: 'string' }, domain: { type: 'string' } },
       execute: async (args) => {
         const q = String(args?.query || '').toLowerCase()
@@ -1060,7 +1118,7 @@ export function apply(ctx, config) {
 
     n += make({
       name: 'tools_help',
-      description: '渐进式披露二级：单个工具的完整 schema（own-layer shim）。',
+      description: DESC.toolsHelp,
       parameters: { name: { type: 'string', required: true, description: '工具名' } },
       execute: async (args) => {
         const wanted = String(args?.name || '').trim()
@@ -1077,13 +1135,13 @@ export function apply(ctx, config) {
 
     n += make({
       name: 'dev_router_status',
-      description: 'Show the current routing state (phase, next tier, persona, unlocked tools, preset). No arguments — call as tools["dev_router_status"]({}). (own-layer shim)',
+      description: DESC.routerStatus,
       parameters: {},
       execute: async () => {
         const sum = stageSummary(stageOf())
         const mode = overrideMap().get(sid) ?? sessionMode(agent?.session)
         const cur = stageOf()
-        return 'router=standard (own-layer shim, v1.11.0)\nphase=' + sum.name + ' (' + sum.stage + '/3)\ncallable(runtime)=' + runtimeCallable(agent.ctx?.get?.('tools'), agent).join(', ') + '\npresentation=' + readPresentation(agent) + '\nmode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')\npersona=' + RL_PERSONA + '\noverride=' + (overrideMap().has(sid) ? String(overrideMap().get(sid)) : 'auto') + '\npreset=' + (ctx.get('agentPresets')?.composedPreset?.(agent.ctx) ?? 'unknown') + '\ngoalTools=get_goal/create_goal/update_goal' + (cur >= STAGES.length - 1 ? '\nfullCatalog=restrict released (all tools open)' : '')
+        return 'router=standard (own-layer shim, ' + ROUTER_VERSION + ')\nphase=' + sum.name + ' (' + sum.stage + '/3)\ncallable(runtime)=' + runtimeCallable(agent.ctx?.get?.('tools'), agent).join(', ') + '\npresentation=' + readPresentation(agent) + '\nmode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')\npersona=' + RL_PERSONA + '\noverride=' + (overrideMap().has(sid) ? String(overrideMap().get(sid)) : 'auto') + '\npreset=' + (ctx.get('agentPresets')?.composedPreset?.(agent.ctx) ?? 'unknown') + '\ngoalTools=get_goal/create_goal/update_goal' + (cur >= STAGES.length - 1 ? '\nfullCatalog=restrict released (all tools open)' : '')
       },
     })
 
@@ -1103,7 +1161,7 @@ export function apply(ctx, config) {
 
     n += make({
       name: 'phase_advance',
-      description: '闯关推进：逐级前进一次（own-layer shim；预放工具调用直达其档，无需手动推进）。进入交付阶段后先 delivery_check。',
+      description: DESC.phaseAdvance,
       parameters: { reason: { type: 'string', description: '推进理由（可选）' } },
       execute: async () => {
         const st = (ensureStage()[sid] ??= { stage: 0, guided: false })
@@ -1147,11 +1205,17 @@ export function apply(ctx, config) {
 
     n += make({
       name: 'delivery_check',
-      description: '交付 gate（own-layer shim）：文件存在/非空/UTF-8 + 可选 headless smoke；全部 PASS 才可宣告完成。',
+      description: DESC.deliveryCheck,
       parameters: {
         file: { type: 'string', required: true, description: '交付物文件路径' },
         url: { type: 'string', description: '可选页面地址（自动编码）' },
         timeoutMs: { type: 'number' }, virtualTimeMs: { type: 'number' }, retry: { type: 'boolean' },
+        evidence: { type: 'object', description: '通用证据清单（任意交付物适用；页面/图像类需已复核的视觉证据）', properties: {
+          items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+            kind: { type: 'string', enum: ['file','page','image','run','test','text'] },
+            label: { type: 'string' }, target: { type: 'string' }, result: { type: 'string' }, reviewed: { type: 'boolean' },
+          }, required: ['kind', 'label'] } },
+        }, required: ['items'] },
       },
       output: {
         schema: {
