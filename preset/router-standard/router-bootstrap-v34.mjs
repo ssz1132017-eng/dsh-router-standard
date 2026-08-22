@@ -17,7 +17,7 @@
 import {
   applyPersona, bandFor, bandOf, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
   classifyTask, extractText, isComplexTask,
-} from './router-core.mjs'
+} from './router-core-v34.mjs'
 import { join, dirname } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'

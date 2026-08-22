@@ -1,10 +1,12 @@
 /** Router classifier + continuous mode tests. */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import {
   classifyTask, personaFor, coreFor, bandFor, testinessFor, parseMode, applyPersona,
   isFlashModel, extractText, sessionMode,
 } from './preset/router-standard/router-core.mjs'
+import { autoAdvance, filterToolGuidance, markerFor, paramHint, pageCheckRun, pageRunnerPath, normalizePageUrl, pageFail, runSandboxJs, stripDomNoise, extractTitle, extractSelectorText, extractConsoleLines } from './preset/router-standard/router-bootstrap.mjs'
 
 test('react: greenfield/build tasks map to react band', () => {
   assert.equal(bandFor(classifyTask('需要本地开发一个马里奥网页小游戏，参考经典原版')), 'react')
@@ -145,4 +147,164 @@ test('applyPersona replaces only the persona section (keeps plan-mode)', () => {
 test('applyPersona tolerates missing sections', () => {
   const out = applyPersona([], 'p')
   assert.deepEqual(out, [{ name: 'router-persona', text: 'p', order: 0 }])
+})
+
+test('autoAdvance: no false advance from "plan" in filenames or read-only editor views', () => {
+  assert.equal(autoAdvance(0, [], 'STANDARD-PLAN.md 是美好期待'), 0)
+  assert.equal(autoAdvance(1, [{ name: 'str_replace_editor', args: { command: 'view', path: 'README.md' } }], ''), 1)
+  assert.equal(autoAdvance(1, [{ name: 'str_replace_editor', args: { command: 'str_replace', path: 'a.txt', old_str: 'x', new_str: 'y' } }], ''), 2)
+})
+
+test('autoAdvance: v1.6 直达语义 — 用哪档工具就跳到哪档；开发意图文本直达', () => {
+  assert.equal(autoAdvance(0, [{ name: 'write', args: { file_path: 'x', content: 'y' } }], ''), 2)
+  assert.equal(autoAdvance(1, [{ name: 'pwsh', args: { command: 'x' } }], ''), 3)
+  assert.equal(autoAdvance(0, [{ name: 'todo_write', args: {} }], ''), 1)
+  assert.equal(autoAdvance(0, [], '写一个 HTML 页面'), 2)
+  assert.equal(autoAdvance(0, [{ name: 'str_replace_editor', args: { command: 'view', path: 'README.md' } }], '写一个 HTML'), 2, 'text intent still jumps even when the only tool was read-only')
+  assert.equal(autoAdvance(3, [{ name: 'read_image', args: { file_path: 'x.png' } }], ''), 3)
+})
+
+test('filterToolGuidance: keeps only visible-tier tool guidance before delivery (v1.6 pre-unlock 2 tiers)', () => {
+  const sections = [
+    { name: 'tool:read', order: 100, text: 'r' },
+    { name: 'tool:write', order: 100, text: 'w' },
+    { name: 'tool:subagent', order: 100, text: 's' },
+    { name: 'plan-mode', order: -50, text: 'p' },
+    { name: 'tools:sdk', order: 150, text: 'sdk' },
+  ]
+  const full = new Set(['read', 'write', 'subagent'])
+  // stage 0: read 当前档 + write（预放两档）→ 都保留；subagent 无阶段→锁定→裁
+  const out0 = filterToolGuidance(sections, 0, full)
+  assert.deepEqual(out0.map((s) => s.name), ['tool:read', 'tool:write', 'plan-mode', 'tools:sdk'])
+  // subagent 仍裁
+  assert.ok(!filterToolGuidance(sections, 1, full).some((s) => s.name === 'tool:subagent'))
+  // delivery：不裁剪
+  assert.equal(filterToolGuidance(sections, 3, full).length, sections.length)
+  // 安全规则：后缀不属全量真实名 → 保留
+  assert.ok(filterToolGuidance([{ name: 'tool:unknown-thing', text: 'x' }], 0, full).length === 1)
+})
+
+test('markerFor: 可调/交付后/meta/全量 semantics (v1.7 单语义化——预放≠不可调)', () => {
+  assert.equal(markerFor('read', 0), '可调')
+  assert.equal(markerFor('todo_write', 0), '可调')
+  assert.equal(markerFor('write', 0), '可调') // stage+2 预放 = 可调（无行为差 → 单标记）
+  assert.equal(markerFor('tools_catalog', 0), 'meta')
+  assert.equal(markerFor('subagent', 0), '交付后')
+  assert.equal(markerFor('read', 3), '全量')
+})
+
+test('runSandboxJs: 语法检查 + 纯逻辑执行（v1.7 本地 JS 引擎，零外部 node）', () => {
+  const ok = runSandboxJs('const a = [1,2,3].map(x => x*2); console.log("sum", a.reduce((p,c)=>p+c,0)); return a.length')
+  assert.equal(ok.ok, true)
+  assert.match(ok.output, /sum 12/)
+  const err = runSandboxJs('const = 3')
+  assert.equal(err.ok, false)
+  assert.match(err.error, /SyntaxError|Unexpected token/)
+  const runtime = runSandboxJs('return nope()')
+  assert.equal(runtime.ok, false)
+  assert.match(runtime.error, /is not a function|ReferenceError|not defined|is not defined/)
+})
+
+test('dom 工具：strip/title/selector/console（v1.7）', () => {
+  const html = '<html><head><title>G-SHOT-READY</title><style>body{color:red}</style></head><body><div id="metrics">sai 0.10 rad</div><div class="val">-8.21</div><script>var x=1</script></body></html>'
+  assert.ok(!stripDomNoise(html).includes('color:red'))
+  assert.ok(!stripDomNoise(html).includes('var x=1'))
+  assert.equal(extractTitle(html), 'G-SHOT-READY')
+  assert.match(extractSelectorText(html, '#metrics'), /sai 0\.10 rad/)
+  assert.match(extractSelectorText(html, '.val'), /-8\.21/)
+  const stderr = 'INFO:CONSOLE(12): "hello"\nERROR:CONSOLE(13): Uncaught TypeError: setLineDash\nUncaught ReferenceError: foo'
+  const lines = extractConsoleLines(stderr)
+  assert.match(lines, /console\[12\]: "hello"/)
+  assert.match(lines, /Uncaught/)
+})
+
+test('paramHint: 参数名+类型速览消灭猜参数摩擦 (v1.4 → v1.5 带类型)', () => {
+  assert.equal(paramHint({ type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' } } }), 'params: pattern: string, path: string')
+  assert.equal(paramHint({ properties: {} }), 'no params')
+  assert.equal(paramHint({ type: 'object', properties: { content: { type: 'string' } } }), 'params: content: string')
+  assert.equal(paramHint({ type: 'object', properties: { limit: { type: 'number', description: 'Maximum lines. Defaults to 2000.' } } }), 'params: limit: number≤2000')
+  assert.match(paramHint(() => ({})), /tools_help/)
+  assert.equal(paramHint(undefined), 'no params')
+})
+
+test('normalizePageUrl: 裸路径/中文路径/相对路径自动转 file:// (v1.6)', () => {
+  assert.match(normalizePageUrl('D:\\黑洞\\index.html'), /^file:\/\/\/D:\/%E9%BB%91%E6%B4%9E\/index\.html$/)
+  assert.match(normalizePageUrl('D:/黑洞/index.html'), /file:\/\/\/D:/)
+  assert.match(normalizePageUrl('index.html'), /file:\/\//)
+  assert.equal(normalizePageUrl('http://127.0.0.1:8080/?shot=probe'), 'http://127.0.0.1:8080/?shot=probe')
+  assert.equal(normalizePageUrl('ftp://x'), 'ftp://x') // 非 http/file scheme 原样 → pageCheckRun 拒绝
+})
+
+test('pageCheckRun: URL 校验 + fake subprocess smoke (v1.5 → v1.6.1 全分支形状)', async () => {
+  // 输出契约形状断言（自写子集校验器，镜像 dsh-tools 的 output 校验：7 字段必需、类型、无额外属性）
+  const assertPageShape = (v) => {
+    assert.equal(typeof v, 'object')
+    const allowed = new Set(['ok', 'exitCode', 'timedOut', 'settleError', 'shot', 'domText', 'stderrTail', 'title', 'consoleTail', 'selectorText', 'jsOutput', 'jsError'])
+    for (const k of Object.keys(v)) assert.ok(allowed.has(k), 'unexpected key: ' + k)
+    assert.equal(typeof v.ok, 'boolean')
+    assert.equal(typeof v.exitCode, 'number')
+    assert.equal(typeof v.timedOut, 'boolean')
+    assert.equal(typeof v.settleError, 'string')
+    assert.equal(typeof v.shot, 'string')
+    assert.equal(typeof v.domText, 'string')
+    assert.equal(typeof v.stderrTail, 'string')
+    assert.equal(typeof v.title, 'string')
+    assert.equal(typeof v.consoleTail, 'string')
+    assert.equal(typeof v.selectorText, 'string')
+    assert.equal(typeof v.jsOutput, 'string')
+    assert.equal(typeof v.jsError, 'string')
+  }
+  // 失败分支（url 非法）
+  const badUrl = await pageCheckRun({ get: () => undefined }, { url: 'ftp://x' })
+  assert.equal(badUrl.ok, false)
+  assertPageShape(badUrl)
+  // 失败分支（无 subprocess 服务）
+  const noSub = await pageCheckRun({ get: (n) => n === 'agent' ? {} : undefined }, { url: 'http://127.0.0.1:9/', timeoutMs: 1000 })
+  assert.equal(noSub.ok, false)
+  assert.match(noSub.settleError, /subprocess/)
+  assertPageShape(noSub)
+  // 失败分支（无法创建 temp profile：TMP 指向一个真实文件 → mkdir 必失败）
+  const savedTmp = process.env.TMP
+  try {
+    process.env.TMP = fileURLToPath(import.meta.url)
+    const noProfile = await pageCheckRun({ get: () => undefined }, { url: 'http://127.0.0.1:9/', timeoutMs: 1000 })
+    assert.equal(noProfile.ok, false)
+    assertPageShape(noProfile)
+  } finally { process.env.TMP = savedTmp }
+  // pageFail 直接构造
+  assertPageShape(pageFail('boom'))
+  // js-only 模式：不启动浏览器（v1.7）
+  const jsr = await pageCheckRun({ get: () => { throw new Error('must not touch subprocess in js mode') } }, { js: 'return 6*9' })
+  assert.equal(jsr.ok, true)
+  assert.equal(jsr.exitCode, 0)
+  assert.match(jsr.jsOutput, /=> 54/)
+  assert.equal(jsr.jsError, '')
+  const jsBad = await pageCheckRun({ get: () => { throw new Error('must not touch subprocess') } }, { js: 'const = 1' })
+  assert.equal(jsBad.ok, false)
+  assert.match(jsBad.jsError, /SyntaxError|Unexpected token/)
+  assertPageShape(jsBad)
+  // 成功路径（fake subprocess）
+  const fake = {
+    get(n) {
+      if (n !== 'subprocess') return undefined
+      return {
+        spawn(spec) {
+          return {
+            done: Promise.resolve({ exitCode: 0 }),
+            collected: {
+              stdout: { readFrom: () => ({ text: '<!doctype html><html><body>GARGANTUA OK</body></html>' }) },
+              stderr: { readFrom: () => ({ text: '' }) },
+            },
+            spec,
+          }
+        },
+      }
+    },
+  }
+  const r = await pageCheckRun(fake, { url: 'file:///x.html', domChars: 100 })
+  assert.equal(r.ok, true)
+  assert.match(r.domText, /GARGANTUA OK/)
+  assert.match(r.shot, /\.dsh-shots/)
+  assertPageShape(r)
+  assert.equal(typeof pageRunnerPath(), 'string')
 })

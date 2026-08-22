@@ -63,15 +63,18 @@
 # 渐进披露路由（v0.7）：阶段化解锁 + PTC SDK 精简 + 泄压引导 + 二级注册表。
 # 外置压力感应提醒（v0.1）：推理压力信号（长推理/循环/无行动）→ 温和提醒。
 - id: pressure-sensor
-  name: ./pressure-sensor.mjs
+  name: ./pressure-sensor.mjs?v=31
   config: {}
 
 - id: router-bootstrap
-  name: ./router-bootstrap.mjs
+  name: ./router-bootstrap-v34.mjs?v=31
   config: {}
 
 - id: tool-bash
   name: '@deepseek-ai/dsh-tool-bash'
+  # win32：host 的 shell seam（dsh-base）只装配 pwsh（bash-sandbox 被 host disabled）；
+  # preset 在 win32 打开 bash 行会让 bash 工具跑成 pwsh 语义（实测报告："bash 像
+  # PowerShell" —— pwd 表格 / cmdlet 报错）。与 host 对齐：win32 禁 bash，POSIX 用 bash。
   disabled: !!js process.platform === 'win32'
 
 - id: tool-pwsh
@@ -89,6 +92,9 @@
   name: '@deepseek-ai/dsh-tool-fs-search'
   config:
     sampleOverCapGlobResults: false
+
+- id: tool-str-replace-editor
+  name: '@deepseek-ai/dsh-tool-str-replace-editor'
 
 # ── background jobs ────────────────────────────────────────────────────────
 

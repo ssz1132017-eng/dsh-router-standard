@@ -17,10 +17,10 @@ We report a measurable property of a frontier reasoning model (DeepSeek V4
 Pro): its agent behavior along a *persona axis* — from a plan-first
 "specification" condition to a doer "reactive" condition — is **not
 continuously tunable**. Fine-grained probing (21 mode points, n=2) shows the
-behavior collapses into three bands: a stable spec region (0–0.19), an
-unstable transition band (0.2–0.49), and a stable react region (0.5–1.0)
+behavior collapses into three bands: a stable react region (0–0.19) — the stable-we attractor (RL condition), an
+unstable transition band (0.2–0.49), and a stable spec region (0.5–1.0) — the let-me/self-routing attractor
 whose 11 interior points behave identically. The same model scores 99/96
-under the spec condition on a maintenance benchmark and 10/10 under the react
+under the react condition on a maintenance benchmark and 10/10 under the spec
 condition on a greenfield build task, while the wrong condition scores 91 and
 6 — a roughly ten-point swing caused by prompt conditioning alone, which
 users experience as "god/ghost duality". We interpret this as a
@@ -58,7 +58,7 @@ This paper adds three findings:
 2. **The duality is symmetric.** The same model that is "god" under spec
    conditions on a maintenance task is "ghost" under those conditions on a
    greenfield build task, and the reverse holds: a doer condition scores 10/10
-   where the spec condition scores 6. Conditioning, not capability, swings the
+   where the react condition scores 6. Conditioning, not capability, swings the
    score.
 3. **Self-routing is impossible for the model.** Behavior is path-committed
    and phase-transitional; there is no mechanism inside the policy for
@@ -230,14 +230,14 @@ Trajectory survives catalog expansion (A3 confirmed).
 
 ### 5.5 Task–trajectory adaptation (scores)
 
-| task family | spec condition | react/code condition |
+| task family | react condition (RL/we) | spec condition (doer/let-me) |
 |---|---|---|
 | maintenance (Project2, V4.1b) | minimal 99/96, anchored 98/99 | standard 91, PTC 92 |
 | greenfield build (Mario web game) | anchored 6/10 | code (PTC) **10/10** |
 
 The greenfield build under code mode produced a 2,566-line single-file game
 (read:write ratio 2.9:1, verification-driven) with a 16.7 KB test harness;
-under the spec condition the same task produced a 1,102-line multi-file game
+under the react condition the same task produced a 1,102-line multi-file game
 with a 1:2 read:write ratio (edit-driven, no tests). Both sessions had zero
 tool errors — the score gap is a conditioning effect, not a failure artifact
 (A4 confirmed; P2 for the mixed band remains an open measurement).
@@ -280,7 +280,7 @@ scan, 8 personas × 2 tasks × n=3) locate the only internal-routing window: a
 **weak persona** (neutral system, or neutral + few-shot routing instruction)
 where task content leans the trajectory in the correct direction
 (discrimination +3.3 / +2.3). The lean is partial — maintenance scores stay
-near zero, never reaching the spec attractor's +1. The mixed competition band
+near zero, never reaching the react attractor's +1. The mixed competition band
 is discrimination-free (0.0). Spec-side personas anti-route: greenfield tasks
 become MORE plan-collective (planScore +8), the measured mechanism behind the
 6/10 anchored Mario score. Self-routing therefore exists only as a
