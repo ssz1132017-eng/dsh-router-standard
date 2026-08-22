@@ -46,7 +46,7 @@ const PROGRESSIVE_DECL =
   + 'Inside run_code the meta tools are bound at phase_begin: tools_catalog/tools_help (secondary disclosure), phase_advance/dev_router_status/dev_router_mode (level-up & self-check), dev_reload_preset_live (live reload), dev_page_check (headless screenshot + DOM smoke). '
   + 'Long-running goals carry goal tools: get_goal / create_goal / update_goal (read before updating, mark complete only when actually achieved). '
   + 'Tool signatures are NOT uniform: before the first use of any tool this session, read its parameter names via tools_catalog or tools_help (or the SDK type inside run_code) — never guess. Runtime caps (read lines, search count, output bytes) are enforced at call time — check tools_help before big calls. '
-  + 'Only run_code may be called directly: EVERY other tool (phase_advance/meta included) goes INSIDE the program as tools[\'name\'](args); a direct call fails as `unknown tool` (costs a round). Zero-arg tools still take {}: tools[\'dev_router_status\']({}) — never reference a binding without calling it (that errors "arguments must be lossless JSON"). '
+  + 'Tools are directly callable (both mode: native + run_code): call write/edit/read/pwsh directly, or batch steps inside run_code as tools[\'name\'](args). Zero-arg tools still take {}: tools[\'dev_router_status\']({}). '
   + 'write/edit bindings return the FULL before/after text — take only path/operation, never print a whole write/edit result (context explosion); inspect the changed lines with grep/read instead. Page verification is built in: dev_page_check(url) → headless Chrome, fresh profile, screenshot + DOM snippet.'
 const PRESSURE_GUIDE =
   '\n\nPressure valve (MAXential): for deep reasoning we do not loop "but wait" — we pour it into the valve: think a step, revise an earlier step, branch + merge an alternative, and complete when truly settled. Depth is our call: a small result gets a small thought, a consequential fork gets full reasoning. Triggers: two or more dependent steps, asked the same thing twice, or caught restating a decision / reaching for "actually / but wait".'
@@ -56,7 +56,7 @@ const START_GUIDE =
   + 'This guide appears only once; after this, no phase messages are injected. '
   + 'Current phase + unlocked tools are always visible in the system prompt (router-stage section) and via dev_router_status. '
   + 'Meta tools are available immediately inside run_code: tools_catalog (index), tools_help (full schema), phase_advance (level up), dev_router_status/dev_router_mode (self-check & override), dev_page_check (page verification). '
-  + 'After this confirmation the ONLY directly-callable tool is run_code — every other tool is called inside the program as tools[\'name\']({...}); calling one directly fails as `unknown tool <name>` (one wasted round). '
+  + 'Tools are directly callable from now on (both mode) — or batch multiple steps inside a run_code program as tools[\'name\']({...}). A direct call always works; run_code is optional for efficiency. '
   + 'You route yourself: to advance, use a next-tier tool (it is pre-unlocked), call phase_advance, or state that the current phase is done.'
 
 const STAGES = [
@@ -810,7 +810,7 @@ export function apply(ctx, config) {
       try { installMetaShim(currentAgent(), { installStage: false, stage: 0 }) } catch { /* ignore */ }
       try {
         const toolsSvc = currentAgent()?.ctx?.get('tools')
-        if (toolsSvc && typeof toolsSvc.presentAs === 'function') toolsSvc.presentAs('code')
+        if (toolsSvc && typeof toolsSvc.presentAs === 'function') toolsSvc.presentAs('both') // v1.13 机制根治：native 直调 + run_code 并存——write/edit 直接可调，不再 unknown tool
       } catch { /* already declared */ }
       const guide = START_GUIDE + '\n\n' + PROGRESSIVE_DECL + '\n\n' + PRESSURE_GUIDE + '\n\n' + stageText(0)
       try {
