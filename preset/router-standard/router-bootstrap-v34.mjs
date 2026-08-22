@@ -21,7 +21,7 @@ import {
 import { join, dirname } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs'
 import vm from 'node:vm'
 
 export const name = 'router-bootstrap'
@@ -79,12 +79,12 @@ const GLOBAL_SAFE = [
   'engram_recall', 'engram_store', 'engram_propose', 'engram_confirm', 'engram_reject',
   'engram_open', 'engram_search', 'engram_link', 'engram_update', 'engram_remove',
   'engram_promote', 'engram_status', 'engram_verify', 'engram_respond',
-  'dev_reload_preset_live', 'dev_page_check',
+  'dev_reload_preset_live', 'dev_page_check', 'delivery_check',
   'get_goal', 'create_goal', 'update_goal',
 ]
 
 const META_TOOLS = ['phase_advance', 'dev_router_status', 'dev_router_mode', 'tools_catalog', 'tools_help']
-const META_LIVE = [...META_TOOLS, 'dev_reload_preset_live', 'dev_page_check', 'phase_begin']
+const META_LIVE = [...META_TOOLS, 'dev_reload_preset_live', 'dev_page_check', 'phase_begin', 'delivery_check']
 const META_GOAL = ['get_goal', 'create_goal', 'update_goal']
 const META_ALL = [...META_LIVE, ...META_GOAL]
 
@@ -93,10 +93,10 @@ const META_ALL = [...META_LIVE, ...META_GOAL]
  *  v1.5：caps 提示 / write-edit 只用 path / shell 真实语义 / dev_page_check。
  *  v1.6：预放两档 + 直达语义（写 HTML 直给任务零路由成本）；跨语言转义提醒。 */
 const STAGE_GUIDES = [
-  'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond) + pre-unlocked write/edit (two tiers ahead — calling one jumps straight there). Ground first: recall, verify claims, then read/ask. Design or build intent already unlocks development tools — no routing ceremony needed. Runtime caps (read lines, output bytes) are enforced at call time — check tools_help before big calls. Advance as we work (phase is self-routed).',
-  'Phase: planning. Unlocked: todo_write/exit_plan_mode + memory review (engram_search/open) + pre-unlocked write/edit/pwsh. Lock the plan, then work — calling a pre-unlocked tool jumps to its phase; phase_advance advances one stage (never skips).',
-  'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link) + pre-unlocked verification tools. Re-read before re-edit: a file changed since your last read must be read again first (editor enforces a fresh read). write/edit results carry the FULL before/after text — take only path/operation and inspect changed lines with grep/read; never print a whole write/edit result. Cross-language escaping: run_code programs are JS — PowerShell "${env:V}" is template-interpolated by JS; build such strings with single quotes or concatenation first.',
-  'Phase: verification. Unlocked: pwsh/read_image/jobs + dev_page_check (meta). Run it, verify it, deliver — the full catalog opens. Shell: on Windows only pwsh exists (bash is disabled on win32 — the host wires pwsh-only; POSIX uses bash). Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). It returns the settled result (no polling, no 600s hangs). If the sandbox denies an in-place verify, escalate the exact command once, never work around it. Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first.',
+  'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond) + pre-unlocked write/edit (two tiers ahead — calling one jumps straight there). Ground first: recall, verify claims, then read/ask. Design or build intent already unlocks development tools — no routing ceremony needed. Runtime caps (read lines, output bytes) are enforced at call time — check tools_help before big calls. Complete when: the task requirements and available evidence are stated clearly. Then work (write is already unlocked).',
+  'Phase: planning. Unlocked: todo_write/exit_plan_mode + memory review (engram_search/open) + pre-unlocked write/edit/pwsh. Lock the plan, then work — calling a pre-unlocked tool jumps to its phase; phase_advance advances one stage (never skips). Complete when: the plan is recorded and decisions are locked. Then develop.',
+  'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link) + pre-unlocked verification tools. Re-read before re-edit: a file changed since your last read must be read again first (editor enforces a fresh read). write/edit results carry the FULL before/after text — take only path/operation and inspect changed lines with grep/read; never print a whole write/edit result. Cross-language escaping: run_code programs are JS — PowerShell "${env:V}" is template-interpolated by JS; build such strings with single quotes or concatenation first. Complete when: the artifact exists and passes its own self-check (loads, no console errors, key values sane). Then phase_advance to verification.',
+  'Phase: verification → delivery gate. Unlocked: pwsh/read_image/jobs + dev_page_check + delivery_check (meta). Shell: on Windows only pwsh exists (bash is disabled on win32 — the host wires pwsh-only; POSIX uses bash). Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first. **Complete only when: delivery_check(file[, url]) returns PASS** — artifact exists / non-empty / UTF-8, headless smoke OK (title + no console errors), and the rendered result reviewed via read_image. Until delivery_check passes, do NOT report the task as delivered — any FAIL: fix and re-run. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
 ]
 
 /** 阶段文本（we-form——you-form 是 let me 吸引子）。
@@ -112,7 +112,7 @@ function stageText(stage) {
   const s = stageSummary(stage)
   const delivery = stage >= STAGES.length - 1 ? '\nDelivery: restrict released — full catalog open (all registered tools).' : ''
   return 'Current phase: ' + s.name + ' (' + s.stage + '/3). Callable now: ' + s.unlocked.join(', ')
-    + (delivery || '\nNot yet callable (until delivery): every other registered tool stays locked with this phase set — the phase is a progress label + a lock, not a promise.')
+    + (delivery || '\nNot yet callable (until delivery): every other registered tool stays locked — and until the delivery phase passes delivery_check, do NOT declare the task delivered. Delivery is the gate, not a progress label.')
     + '\nStage guide: ' + (STAGE_GUIDES[stage] || '')
     + '\nPhase is self-routed state: calling a pre-unlocked tool jumps the phase to that tool\'s stage; phase_advance (meta) advances one stage; or state that our phase is done.'
 }
@@ -221,6 +221,22 @@ export function runtimeMark(toolsSvc, scope, name) {
     if (META_ALL.includes(name)) return visible.has(name) ? 'meta' : '交付后'
     return visible.has(name) ? '可调' : '交付后'
   } catch { return markerFor(name, 0) }
+}
+
+/** 运行时真实可调列表（v1.11——status 的 callable 与 SDK 绑定同源）。
+ *  只返回"确实绑定在 run_code tools 上"的阶段工具与 meta 工具；其余一律视为交付后。 */
+export function runtimeCallable(toolsSvc, scope) {
+  try {
+    if (typeof toolsSvc?.view !== 'function') return []
+    const visible = toolsSvc.view(scope).visible
+    const keys = typeof visible?.keys === 'function' ? visible.keys() : []
+    const out = []
+    for (const name of keys) {
+      if (name === 'run_code') continue
+      if (STAGES.some((s) => s.tools.includes(name)) || META_ALL.includes(name)) out.push(name)
+    }
+    return [...out].sort()
+  } catch { return [] }
 }
 
 /** 参数名速览（一行）：catalog 行内嵌——消灭"猜参数名"摩擦（glob 的 pattern / read 的 file_path / todo_write 的 content 各不相同）。 */
@@ -514,6 +530,50 @@ async function pageCheckRunOnce(ctx, args) {
   }
 }
 
+/** 交付 gate（v1.11——用户实弹：缺"交付 gate 工具"，模型把"功能做完"当"完成交付"）：
+ *  校验交付物：存在/非空/UTF-8 编码 + 可选 headless smoke（加载/标题/console），
+ *  输出 PASS/FAIL + 证据清单；均 PASS 才允许宣告完成。CHECK 永远不强制解锁任何权限，
+ *  它是阶段出口契约的落地工具。 */
+export async function deliveryCheck(ctx, args) {
+  const file = String(args?.file || '').trim()
+  const checks = []
+  if (!file) return { ok: false, checks: [{ name: 'file-path', pass: false, detail: 'missing file parameter' }] }
+  try {
+    const st = statSync(file)
+    checks.push({ name: 'file-exists', pass: true, detail: `${file} (${st.size} bytes, mtime ${st.mtime.toISOString()})` })
+    checks.push(st.size > 0
+      ? { name: 'file-nonempty', pass: true, detail: `${st.size} bytes` }
+      : { name: 'file-nonempty', pass: false, detail: 'file is 0 bytes' })
+  } catch (e) {
+    return { ok: false, checks: [...checks, { name: 'file-exists', pass: false, detail: String((e && e.message) || e) }] }
+  }
+  try {
+    const head = readFileSync(file).subarray(0, 65536)
+    new TextDecoder('utf-8', { fatal: true }).decode(head)
+    checks.push({ name: 'encoding-utf8', pass: true, detail: 'UTF-8 decode OK (head 64KB)' })
+  } catch (e) {
+    checks.push({ name: 'encoding-utf8', pass: false, detail: String((e && e.message) || e) })
+  }
+  if (args?.url) {
+    const smoke = await pageCheckRun(ctx, { ...args, url: args.url })
+    checks.push({
+      name: 'headless-smoke',
+      pass: smoke.ok,
+      detail: `title=${smoke.title || '(empty)'} dom=${smoke.domText.length} console=${smoke.consoleTail ? 'errors present' : 'clean'}${smoke.timedOut ? ' TIMED_OUT' : ''}`,
+    })
+  }
+  return { ok: checks.every((c) => c.pass), checks }
+}
+
+function deliveryCheckRender(_args, v) {
+  let text = 'delivery-check: ' + (v.ok ? 'PASS ✅' : 'FAIL ❌') + '\n'
+  for (const c of v.checks || []) text += `- [${c.pass ? 'PASS' : 'FAIL'}] ${c.name}: ${c.detail}\n`
+  text += v.ok
+    ? 'All checks passed — delivery gate satisfied; you may report completion to the user.'
+    : 'Delivery gate NOT satisfied — do NOT report completion; fix the failing checks and re-run delivery_check.'
+  return [{ type: 'text', text }]
+}
+
 function pageCheckRender(_args, v) {
   const head = Number.isFinite(v.exitCode) ? v.exitCode : -1
   let text = 'page-check: ' + (v.ok ? 'OK' : 'FAIL')
@@ -770,7 +830,7 @@ export function apply(ctx, config) {
 
   registerTool({
     name: 'phase_advance',
-    description: '闯关推进：声明当前阶段已完成，进入下一阶段（解锁新工具 + 阶段提示）。逐级推进（一次一级，不跳级）；预放工具调用会直达其档，不需要 phase_advance。仅在明确完成本阶段工作时调用。',
+    description: '闯关推进：声明当前阶段已完成，进入下一阶段（解锁新工具 + 阶段提示）。逐级推进（一次一级，不跳级）；预放工具调用会直达其档，不需要 phase_advance。仅在明确完成本阶段工作时调用。进入验证/交付阶段后：先 delivery_check(file[, url])，PASS 才可宣告完成。',
     parameters: { reason: { type: 'string', description: '推进理由（可选，记录用）' } },
     output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: String(v) }] },
     async execute(args) {
@@ -859,7 +919,7 @@ export function apply(ctx, config) {
       return [
         'router=standard (progressive, v1.7.0)',
         'phase=' + sum.name + ' (' + sum.stage + '/3)',
-        'callable=[' + sum.unlocked.join(', ') + ']',
+        'callable=[' + runtimeCallable(agent?.ctx?.get?.('tools'), agent).join(', ') + ']', // v1.11 运行时事实（与 SDK 绑定同源）
         'presentation=' + readPresentation(agent),
         'mode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')',
         'persona=' + RL_PERSONA,
@@ -923,6 +983,25 @@ export function apply(ctx, config) {
     }, render: pageCheckRender },
     async execute(args) {
       return await pageCheckRun(ctx, args)
+    },
+  })
+
+  registerTool({
+    name: 'delivery_check',
+    description: '交付 gate（阶段出口契约）：校验交付物文件存在/非空/UTF-8 编码，可选 headless smoke（传 url：加载/标题/console）；输出 PASS/FAIL + 证据清单。⚠️ 全部 PASS 才允许向用户宣告完成交付——任一 FAIL 必须修复后重跑，不允许绕过。',
+    parameters: {
+      file: { type: 'string', required: true, description: '交付物文件路径（绝对路径或工作区相对路径）' },
+      url: { type: 'string', description: '可选：交付物为页面时的地址（http(s):// / file:// / 裸路径，自动编码）' },
+      timeoutMs: { type: 'number', description: 'smoke 硬超时毫秒（默认 20000）' },
+      virtualTimeMs: { type: 'number', description: 'smoke 虚拟时间预算（默认 8000）' },
+      retry: { type: 'boolean', description: 'smoke 失败时重试一次（默认 false）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: {
+      ok: { type: 'boolean' },
+      checks: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, pass: { type: 'boolean' }, detail: { type: 'string' } }, required: ['name', 'pass', 'detail'] } },
+    }, required: ['ok', 'checks'] }, render: deliveryCheckRender },
+    async execute(args) {
+      return await deliveryCheck(ctx, args)
     },
   })
 
@@ -1007,7 +1086,7 @@ export function apply(ctx, config) {
         const sum = stageSummary(stageOf())
         const mode = overrideMap().get(sid) ?? sessionMode(agent?.session)
         const cur = stageOf()
-        return 'router=standard (own-layer shim, v1.7.0)\nphase=' + sum.name + ' (' + sum.stage + '/3)\ncallable=[' + sum.unlocked.join(', ') + ']\npresentation=' + readPresentation(agent) + '\nmode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')\npersona=' + RL_PERSONA + '\noverride=' + (overrideMap().has(sid) ? String(overrideMap().get(sid)) : 'auto') + '\npreset=' + (ctx.get('agentPresets')?.composedPreset?.(agent.ctx) ?? 'unknown') + '\ngoalTools=get_goal/create_goal/update_goal' + (cur >= STAGES.length - 1 ? '\nfullCatalog=restrict released (all tools open)' : '')
+        return 'router=standard (own-layer shim, v1.11.0)\nphase=' + sum.name + ' (' + sum.stage + '/3)\ncallable(runtime)=' + runtimeCallable(agent.ctx?.get?.('tools'), agent).join(', ') + '\npresentation=' + readPresentation(agent) + '\nmode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')\npersona=' + RL_PERSONA + '\noverride=' + (overrideMap().has(sid) ? String(overrideMap().get(sid)) : 'auto') + '\npreset=' + (ctx.get('agentPresets')?.composedPreset?.(agent.ctx) ?? 'unknown') + '\ngoalTools=get_goal/create_goal/update_goal' + (cur >= STAGES.length - 1 ? '\nfullCatalog=restrict released (all tools open)' : '')
       },
     })
 
@@ -1027,7 +1106,7 @@ export function apply(ctx, config) {
 
     n += make({
       name: 'phase_advance',
-      description: '闯关推进：逐级前进一次（own-layer shim；预放工具调用直达其档，无需手动推进）。',
+      description: '闯关推进：逐级前进一次（own-layer shim；预放工具调用直达其档，无需手动推进）。进入交付阶段后先 delivery_check。',
       parameters: { reason: { type: 'string', description: '推进理由（可选）' } },
       execute: async () => {
         const st = (ensureStage()[sid] ??= { stage: 0, guided: false })
@@ -1067,6 +1146,29 @@ export function apply(ctx, config) {
         render: pageCheckRender,
       },
       execute: async (args) => await pageCheckRun(ctx, args),
+    })
+
+    n += make({
+      name: 'delivery_check',
+      description: '交付 gate（own-layer shim）：文件存在/非空/UTF-8 + 可选 headless smoke；全部 PASS 才可宣告完成。',
+      parameters: {
+        file: { type: 'string', required: true, description: '交付物文件路径' },
+        url: { type: 'string', description: '可选页面地址（自动编码）' },
+        timeoutMs: { type: 'number' }, virtualTimeMs: { type: 'number' }, retry: { type: 'boolean' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean' },
+            checks: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, pass: { type: 'boolean' }, detail: { type: 'string' } }, required: ['name', 'pass', 'detail'] } },
+          },
+          required: ['ok', 'checks'],
+        },
+        render: deliveryCheckRender,
+      },
+      execute: async (args) => await deliveryCheck(ctx, args),
     })
 
     n += make({

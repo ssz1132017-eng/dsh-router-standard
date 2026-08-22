@@ -2,11 +2,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
+import { writeFileSync, rmSync } from 'node:fs'
 import {
   classifyTask, personaFor, coreFor, bandFor, testinessFor, parseMode, applyPersona,
   isFlashModel, extractText, sessionMode,
 } from './preset/router-standard/router-core.mjs'
-import { autoAdvance, filterToolGuidance, markerFor, runtimeMark, paramHint, pageCheckRun, pageRunnerPath, normalizePageUrl, pageFail, runSandboxJs, stripDomNoise, extractTitle, extractSelectorText, extractConsoleLines } from './preset/router-standard/router-bootstrap.mjs'
+import { autoAdvance, filterToolGuidance, markerFor, runtimeMark, runtimeCallable, deliveryCheck, paramHint, pageCheckRun, pageRunnerPath, normalizePageUrl, pageFail, runSandboxJs, stripDomNoise, extractTitle, extractSelectorText, extractConsoleLines } from './preset/router-standard/router-bootstrap.mjs'
 
 test('react: greenfield/build tasks map to react band', () => {
   assert.equal(bandFor(classifyTask('需要本地开发一个马里奥网页小游戏，参考经典原版')), 'react')
@@ -329,4 +331,34 @@ test('pageCheckRun: URL 校验 + fake subprocess smoke (v1.5 → v1.6.1 全分�
   assert.match(r.shot, /\.dsh-shots/)
   assertPageShape(r)
   assert.equal(typeof pageRunnerPath(), 'string')
+})
+test('deliveryCheck: 交付 gate 检查清单（v1.11）', async () => {
+  // 缺失路径 → FAIL + 证据
+  const nofile = await deliveryCheck({ get: () => undefined }, { file: 'Z:\\\\no-such-file-xyz.html' })
+  assert.equal(nofile.ok, false)
+  assert.ok(nofile.checks.some((c) => c.name === 'file-exists' && !c.pass))
+  // 临时有效文件 → 存在/非空/UTF-8 全 PASS（无 url 时不跑 smoke）
+  const tmp = join(process.cwd(), '.t-delivery-probe.html')
+  writeFileSync(tmp, '<!doctype html><html><head><title>OK</title></head><body>x</body></html>', 'utf8')
+  try {
+    const okr = await deliveryCheck({ get: () => undefined }, { file: tmp })
+    assert.equal(okr.ok, true)
+    assert.ok(okr.checks.every((c) => c.pass))
+  } finally { rmSync(tmp, { force: true }) }
+  // 非法 UTF-8 → encoding FAIL
+  const bad = join(process.cwd(), '.t-bad.html')
+  writeFileSync(bad, Buffer.from([0xff, 0xfe, 0x00, 0x41]), 'utf8')
+  try {
+    const badr = await deliveryCheck({ get: () => undefined }, { file: bad })
+    assert.equal(badr.ok, false)
+    assert.ok(badr.checks.some((c) => c.name === 'encoding-utf8' && !c.pass))
+  } finally { rmSync(bad, { force: true }) }
+})
+
+test('runtimeCallable: 与 SDK 绑定同源（v1.11）', () => {
+  const svc = { view: () => ({ visible: new Map([['read', {}], ['write', {}], ['run_code', {}], ['subagent', {}]]) }) }
+  const names = runtimeCallable(svc, {})
+  assert.ok(names.includes('read') && names.includes('write'))
+  assert.ok(!names.includes('run_code'))
+  assert.ok(!names.includes('subagent'), '非阶段/非 meta 不列入 callable')
 })
