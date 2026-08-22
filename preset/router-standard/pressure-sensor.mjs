@@ -24,12 +24,16 @@ function log(msg) {
   try { appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`, 'utf8') } catch { /* ignore */ }
 }
 
-/** 压力阈值（可配置）。 */
+/** 压力阈值（可配置）。
+ *  v1.10 降噪定稿（用户实测："中间信号高频注入打断思路"）：
+ *  压力提醒只在**失联**时出现——连续 noToolSteps 步无任何工具调用；
+ *  deep-reasoning / loop-pattern 不再是独立触发信号，只是失联期间的附加描述。
+ *  干活中的长思考、偶发犹豫词从此永远不打扰（深度自主：不干预思考自由）。 */
 const CHARS_PER_STEP = 30000 // 单步推理字符阈值
 // P2: JS \b 对中文无效（中文非 \w）——中文词单独匹配
 const LOOP_PATTERN = /(but wait|actually|hold on|hmm|重新确认|让我再|再想想|等一下)/gi
 const LOOP_HITS = 4 // 循环词阈值
-const NO_TOOL_STEPS = 3 // 连续无工具调用步数阈值
+const NO_TOOL_STEPS = 5 // 连续无工具调用步数阈值（失联判据；3→5：规划/多步深思考不再误报）
 /** Flash 系模型：推理链天然更短——阈值按此比例收紧（STANDARD-PLAN §9.4 压力阈值自适）。 */
 const FLASH_SCALE = 0.6
 
@@ -69,17 +73,17 @@ export function apply(ctx, config = {}) {
     const st = state.get(sid)
     if (!st) return decision
 
-    // 评估信号（按模型缩放：Flash 系轻量阈值）
+    // 评估信号（v1.10 定稿：只判"失联"——连续无工具调用 ≥ noToolSteps 才提醒；
+    // deep-reasoning / loop-pattern 只是失联期间的附加描述，不再独立触发）
     const model = String(agent?.options?.model || '')
     const scale = /flash/i.test(model) ? FLASH_SCALE : 1
     const triggers = []
-    if (st.stepChars > charsPerStep * scale) triggers.push(`deep-reasoning ${st.stepChars} chars`)
-    // v1.8 降噪：loop-pattern 仅当"连续无行动"同时成立才提醒——干活中说的话带犹豫词不打扰，
-    // 真正"想不动手"的循环才提示（五轮实弹：提醒与开发任务混在一起干扰注意力）。
     st.noToolSteps += 1
-    const loopActive = st.loopHits >= Math.max(2, Math.round(loopHits * scale))
-    if (loopActive && st.noToolSteps >= 2) triggers.push(`loop-pattern x${st.loopHits} (with ${st.noToolSteps} steps no action)`)
-    if (st.noToolSteps >= noToolSteps) triggers.push(`${st.noToolSteps} steps no action`)
+    if (st.noToolSteps >= noToolSteps) {
+      triggers.push(`${st.noToolSteps} steps no action`)
+      if (st.stepChars > charsPerStep * scale) triggers.push(`deep-reasoning ${st.stepChars} chars`)
+      if (st.loopHits >= Math.max(2, Math.round(loopHits * scale))) triggers.push(`loop-pattern x${st.loopHits}`)
+    }
 
     // 步推进（v1.5 冷却 2→3 步：反馈"提醒与开发任务混在一起干扰注意力"——降噪但保留捕获）
     st.stepNo += 1
