@@ -65,11 +65,8 @@ const STAGES = [
   { name: '开发', tools: ['write', 'edit', 'str_replace_editor', 'engram_store', 'engram_link'] },
   { name: '验证', tools: ['pwsh', 'bash', 'read_image', 'job_list', 'job_output', 'job_kill'] },
 ]
-// 平台事实（v1.5）：win32 的 shell seam 只有 pwsh（host 禁用 bash-sandbox）——验证档从可见面去掉 bash，
-// 避免"unlocked 列表承诺一个不存在的工具"。POSIX 保留 bash。
-if (process.platform === 'win32') {
-  for (const s of STAGES) s.tools = s.tools.filter((t) => t !== 'bash')
-}
+// 平台事实（v1.12）：win32 已由 gitbash-shell 组提供真 Git Bash（isolate realm 私有 shell seam，
+// 机制参照 liceses/dsh-gitbash-preset, MIT）——bash 重回验证档（原 v1.5 的平台剔除已回退）。
 
 const GLOBAL_SAFE = [
   'read', 'write', 'edit', 'glob', 'grep', 'web_search', 'ask_user_question',
@@ -96,7 +93,7 @@ const STAGE_GUIDES = [
   'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond) + pre-unlocked write/edit (two tiers ahead — calling one jumps straight there). Ground first: recall, verify claims, then read/ask. Design or build intent already unlocks development tools — no routing ceremony needed. Runtime caps (read lines, output bytes) are enforced at call time — check tools_help before big calls. Complete when: the task requirements and available evidence are stated clearly. Then work (write is already unlocked).',
   'Phase: planning. Unlocked: todo_write/exit_plan_mode + memory review (engram_search/open) + pre-unlocked write/edit/pwsh. Lock the plan, then work — calling a pre-unlocked tool jumps to its phase; phase_advance advances one stage (never skips). Complete when: the plan is recorded and decisions are locked. Then develop.',
   'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link) + pre-unlocked verification tools. Re-read before re-edit: a file changed since your last read must be read again first (editor enforces a fresh read). write/edit results carry the FULL before/after text — take only path/operation and inspect changed lines with grep/read; never print a whole write/edit result. Cross-language escaping: run_code programs are JS — PowerShell "${env:V}" is template-interpolated by JS; build such strings with single quotes or concatenation first. Complete when: the artifact exists and passes its own self-check (loads, no console errors, key values sane). Then phase_advance to verification.',
-  'Phase: verification → delivery gate. Unlocked: pwsh/read_image/jobs + dev_page_check + delivery_check (meta). Shell: on Windows only pwsh exists (bash is disabled on win32 — the host wires pwsh-only; POSIX uses bash). Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first. **Complete only when: delivery_check(file[, url]) returns PASS** — artifact exists / non-empty / UTF-8, headless smoke OK (title + no console errors), and the rendered result reviewed via read_image. Until delivery_check passes, do NOT report the task as delivered — any FAIL: fix and re-run. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
+  'Phase: verification → delivery gate. Unlocked: pwsh/bash/read_image/jobs + dev_page_check + delivery_check (meta). Shell: Windows: bash = Git Bash (MSYS, GNU) — first-class shell (pwsh remains for PowerShell-native needs); POSIX: bash. Git Bash needs full access to start (MSYS cannot run under a restricted token) — if it fails at workspace-write, do the documented one-shot escalation, never bypass the sandbox. Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first. **Complete only when: delivery_check(file[, url]) returns PASS** — artifact exists / non-empty / UTF-8, headless smoke OK (title + no console errors), and the rendered result reviewed via read_image. Until delivery_check passes, do NOT report the task as delivered — any FAIL: fix and re-run. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
 ]
 
 /** 阶段文本（we-form——you-form 是 let me 吸引子）。

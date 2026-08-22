@@ -63,19 +63,34 @@
 # 渐进披露路由（v0.7）：阶段化解锁 + PTC SDK 精简 + 泄压引导 + 二级注册表。
 # 外置压力感应提醒（v0.1）：推理压力信号（长推理/循环/无行动）→ 温和提醒。
 - id: pressure-sensor
-  name: ./pressure-sensor.mjs?v=36
+  name: ./pressure-sensor.mjs?v=37
   config: {}
 
 - id: router-bootstrap
-  name: ./router-bootstrap-v34.mjs?v=36
+  name: ./router-bootstrap-v34.mjs?v=37
   config: {}
 
-- id: tool-bash
-  name: '@deepseek-ai/dsh-tool-bash'
-  # win32：host 的 shell seam（dsh-base）只装配 pwsh（bash-sandbox 被 host disabled）；
-  # preset 在 win32 打开 bash 行会让 bash 工具跑成 pwsh 语义（实测报告："bash 像
-  # PowerShell" —— pwd 表格 / cmdlet 报错）。与 host 对齐：win32 禁 bash，POSIX 用 bash。
-  disabled: !!js process.platform === 'win32'
+# ── shell（win32：Git Bash 私有 shell seam——机制参照 liceses/dsh-gitbash-preset, MIT）──
+# host 在 win32 只装配 pwsh（dsh-base disabled bash-sandbox），bash 行会跑成 pwsh 语义。
+# 本组以 entry-local realm 提供私有 `shell` 服务（gitbash-executor：<gitBash> -lc <command>，
+# 每次调用新 shell，无 PTY 持久会话），同组 tool-bash 消费它 → Windows 上拿到真正的 Git Bash；
+# tool-pwsh 保留为降级选项（PowerShell 原生）。POSIX 走 host 原生 bash（组整体禁用）。
+# 诚实边界（不绕过沙箱）：MSYS 无法在受限令牌内启动——workspace-write 下 bash 可能启动失败，
+# 按指引做单次 danger-full-access 升级（走正常审批，不篡改策略）。
+- id: gitbash-shell
+  name: cordis:group
+  group: true
+  isolate:
+    shell: true
+  config:
+    - id: gitbash-executor
+      name: ./gitbash-executor.mjs?v=2
+      disabled: !!js process.platform !== 'win32'
+      config: {}
+
+    - id: tool-bash
+      name: '@deepseek-ai/dsh-tool-bash'
+      disabled: !!js process.platform !== 'win32'
 
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
