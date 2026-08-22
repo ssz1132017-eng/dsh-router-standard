@@ -125,7 +125,7 @@ version of that external routing.
 
 ## Usage
 
-**Three presets** (v0.3.0): install one or more under `~/.dsh/.agent-presets/`:
+**Two presets** (v0.3.0; the router-pro line was retired): install one or more under `~/.dsh/.agent-presets/`:
 
 ```powershell
 # 标准路由预设（RL 接口还原，默认推荐）
@@ -135,10 +135,6 @@ Copy-Item -Recurse .\preset\router-standard $target
 # spec 路由预设（深度思考优先）
 $target = Join-Path $env:USERPROFILE '.dsh\.agent-presets\router-spec'
 Copy-Item -Recurse .\preset\router-spec $target
-
-# Pro 路由预设（V4 Pro 测量最优，router-pro）
-$target = Join-Path $env:USERPROFILE '.dsh\.agent-presets\router-pro'
-Copy-Item -Recurse .\preset\router-pro $target
 ```
 
 **免重启安装（推荐）**：装好 [dsh-super-injector](https://github.com/yjh051108/dsh-super-injector)
