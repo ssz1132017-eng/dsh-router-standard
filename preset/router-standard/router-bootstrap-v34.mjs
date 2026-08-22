@@ -1,5 +1,5 @@
 /**
- * router-bootstrap (standard v1.13.0): progressive tool disclosure — game-style timeline.
+ * router-bootstrap (standard v1.14.0): progressive tool disclosure — game-style timeline.
  *
  * 时序（用户定稿）：
  *   T0 首轮 = 纯 RL 句（46 字符）+ phase_begin（唯一确认工具，native；稳定 we）
@@ -41,7 +41,7 @@ function toJsonSchema(spec) {
 }
 
 const RL_PERSONA = 'You are a helpful software engineer assistant.'
-const ROUTER_VERSION = 'v1.13.0'
+const ROUTER_VERSION = 'v1.14.0'
 /* 描述单源（v1.13 审计修复）：main 注册与 own-layer shim 读同一份，杜绝双份漂移。 */
 const DESC = {
   toolsCatalog: '渐进式披露一级：全部工具（名称 + 一行摘要 + 阶段标记）。query 关键词过滤；domain 域浏览。',
@@ -99,7 +99,7 @@ const META_ALL = [...META_LIVE, ...META_GOAL]
  *  v1.5：caps 提示 / write-edit 只用 path / shell 真实语义 / dev_page_check。
  *  v1.6：预放两档 + 直达语义（写 HTML 直给任务零路由成本）；跨语言转义提醒。 */
 const STAGE_GUIDES = [
-  'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond) + pre-unlocked write/edit (two tiers ahead — calling one jumps straight there). Ground first: recall, verify claims, then read/ask. Design or build intent already unlocks development tools — no routing ceremony needed. Runtime caps (read lines, output bytes) are enforced at call time — check tools_help before big calls. Complete when: the task requirements and available evidence are stated clearly. Then work (write is already unlocked).',
+  'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond) + pre-unlocked write/edit (two tiers ahead — calling one jumps straight there). Ground first: recall, verify claims, then read/ask. Design or build intent already unlocks development tools — no routing ceremony needed. Runtime caps (read lines, output bytes) are enforced at call time — check tools_help before big calls. Complete when: the task requirements and available evidence are stated clearly. Then work (write is already unlocked). Stage-tool note: bash/pwsh/read_image belong to the verification stage — they show [未解锁] at stage 0, become [可调] from stage 1 (pre-unlocked two tiers) and [全量] at stage 3; this is not "after delivery".',
   'Phase: planning. Unlocked: todo_write/exit_plan_mode + memory review (engram_search/open) + pre-unlocked write/edit/pwsh. Lock the plan, then work — calling a pre-unlocked tool jumps to its phase; phase_advance advances one stage (never skips). Complete when: the plan is recorded and decisions are locked. Then develop.',
   'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link) + pre-unlocked verification tools. Re-read before re-edit: a file changed since your last read must be read again first (editor enforces a fresh read). write/edit results carry the FULL before/after text — take only path/operation and inspect changed lines with grep/read; never print a whole write/edit result. Cross-language escaping: run_code programs are JS — PowerShell "${env:V}" is template-interpolated by JS; build such strings with single quotes or concatenation first. Complete when: the artifact exists and passes its own self-check (loads, no console errors, key values sane). Then phase_advance to verification.',
   'Phase: verification → delivery gate. Unlocked: pwsh/bash/read_image/jobs + dev_page_check + delivery_check (meta). Shell: Windows: bash = Git Bash (MSYS, GNU) — first-class shell (pwsh remains for PowerShell-native needs); POSIX: bash. Git Bash needs full access to start (MSYS cannot run under a restricted token) — if it fails at workspace-write, do the documented one-shot escalation, never bypass the sandbox. Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first. **Evidence gate: delivery_check requires an evidence manifest appropriate to the artifact** — text/code: read or grep assertions, or dev_page_check({js}) unit tests (kind=text/test); commands: real stdout summary (kind=run); pages/3D/images: dev_page_check multi-view screenshots + read_image review each (kind=page/image, reviewed:true; view count is up to the task — 3D usually iso/front/side/top, simple pages 1-2 views). Delivery PASS requires evidence on top of file/UTF-8/headless checks: missing evidence, missing targets, unreviewed visuals, or empty run results → FAIL. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
@@ -118,7 +118,7 @@ function stageText(stage) {
   const s = stageSummary(stage)
   const delivery = stage >= STAGES.length - 1 ? '\nDelivery: restrict released — full catalog open (all registered tools).\nDelivery evidence gate: provide an evidence manifest (kind by artifact). Visual/3D tasks: capture views + read_image review; no fixed view count.' : ''
   return 'Current phase: ' + s.name + ' (' + s.stage + '/3). Callable now: ' + s.unlocked.join(', ')
-    + (delivery || '\nNot yet callable (until delivery): every other registered tool stays locked — and until the delivery phase passes delivery_check, do NOT declare the task delivered. Delivery is the gate, not a progress label.')
+    + (delivery || '\nLocked (not in current/pre-unlocked window): every other registered tool stays locked — e.g. bash belongs to the verification stage (pre-unlocked from stage 1, fully open at stage 3); it is not "after delivery" only. Until the delivery phase passes delivery_check, do NOT declare the task delivered. Delivery is the gate, not a progress label.')
     + '\nStage guide: ' + (STAGE_GUIDES[stage] || '')
     + '\nPhase is self-routed state: calling a pre-unlocked tool jumps the phase to that tool\'s stage; phase_advance (meta) advances one stage; or state that our phase is done.'
 }
@@ -224,9 +224,9 @@ export function markerFor(name, stage) {
   if (stage >= STAGES.length - 1) return '全量'
   if (META_ALL.includes(name)) return 'meta'
   const idx = STAGES.findIndex((s) => s.tools.includes(name))
-  if (idx < 0) return '交付后'
+  if (idx < 0) return '未解锁'
   if (idx <= stage + 2) return '可调' // v1.6 预放两档 = 已可调："预解锁" 与 "可调" 无行为差 → 单语义
-  return '交付后'
+  return '未解锁' // v1.14：『未解锁』= 尚未进入当前+预放窗口（如 bash 属验证档：阶段1起预放、阶段3全量），非"交付之后才给"
 }
 
 /** 运行时真绑定标记（v1.9）：registry.view(scope).visible 是 SDK 生成的唯一事实源——
@@ -236,8 +236,8 @@ export function runtimeMark(toolsSvc, scope, name) {
     if (typeof toolsSvc?.view !== 'function') return markerFor(name, 0)
     const visible = toolsSvc.view(scope).visible
     if (typeof visible?.has !== 'function') return markerFor(name, 0)
-    if (META_ALL.includes(name)) return visible.has(name) ? 'meta' : '交付后'
-    return visible.has(name) ? '可调' : '交付后'
+    if (META_ALL.includes(name)) return visible.has(name) ? 'meta' : '未解锁'
+    return visible.has(name) ? '可调' : '未解锁'
   } catch { return markerFor(name, 0) }
 }
 

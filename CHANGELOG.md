@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.9.0 — 自优化审计修复（v1.13/v1.14，用户实测驱动）
+
+- **P1: bash invalid output** — `gitbash-executor` 缺少 `signal` → `canonicalBashResult` 输出 `signal: undefined` → run_code lossless-JSON 拒绝（`tool "bash" returned invalid output: value is not lossless JSON`）。执行器补 `signal: outcome?.signal ?? null`；本机/生产/源仓库已同步。
+- **P1: run_code 二级披露空洞** — `registryFullIndex.findDef` 只查层链，host 注入的 `run_code` 无定义 → catalog/help 空描述/空参数；新增 host 兜底（view/schemas 反查）。
+- **P1: 阶段状态落盘分裂** — `stageFile()` 用 `DSH_HOME || homedir()` 导致同一状态落在多个位置；统一 `DSH_HOME || homedir()/.dsh` 根，save/load 失败不再静默。
+- **P2: dev_router_status 隐瞒 run_code** — `runtimeCallable` 的 `if (name === 'run_code') continue` 改为列入 base 入口。
+- **P2: 双份描述/版本戳/48+ 陈旧** — 描述与版本单源（`DESC` + `ROUTER_VERSION`），`PROGRESSIVE_DECL` 去掉写死 48+，main/shim/文件头版本统一。
+- **P2: 标签清义** — 「交付后」改「未解锁」（阶段 0 显示；bash 属验证档：阶段 1 起预放、阶段 3 全量；非“交付完成后才解锁”），阶段 0 引导补验证档说明。
+- 验证：`node --check` ×3、selftest PASS、live reload 后 `dev_router_status` v1.14.0、catalog 阶段 0 bash=`[未解锁]` / 阶段 3=`[可调]`、`run_code` 元数据恢复。
+
 ## v1.8.0 — Progressive disclosure suite（研发线，未发布）
 
 Self-optimization rounds v1.3 → v1.8 (five real-session feedback loops, Gargantua / suspension-workstation builds):
