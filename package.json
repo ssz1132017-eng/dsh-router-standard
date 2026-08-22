@@ -8,7 +8,7 @@
   "files": [
     "preset/",
     "docs/",
-    "README.md",
+    "README.md",\n    "CHANGELOG.md",
     "LICENSE",
     "NOTICE",
     "router.test.mjs",
