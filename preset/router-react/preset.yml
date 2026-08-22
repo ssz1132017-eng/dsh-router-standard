@@ -1,2 +1,2 @@
-name: "Router Standard (experimental)"
-description: "Task-aware routing — classify-first persona + full prompt sections; first-turn core tool surface; near-field guides in weak mode. Full Standard tools after the first tool call."
+name: Router React (experimental)
+description: Task-aware routing — RL-interface restoration (think-act loops): first request = one RL sentence + shell/editor surface. Full Standard tools after the first tool call.
