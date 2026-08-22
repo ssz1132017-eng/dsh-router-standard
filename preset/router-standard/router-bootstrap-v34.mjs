@@ -199,7 +199,9 @@ function registryFullIndex(toolsSvc, scope) {
   } catch { return [] }
 }
 
-/** 二级披露可见性标记：注意力经济——先告诉模型"现在能调什么、什么锁着"。 */
+/** 二级披露可见性标记（v1.9 根修——"标注可调但 run_code 未绑定"六轮实弹反馈）：
+ *  静态阶段映射会与运行时 view(scope).visible（SDK 真绑定）错位；标记必须回答
+ *  "这个工具现在真的绑在 run_code 的 tools 上吗"——以运行时可见面为准。 */
 export function markerFor(name, stage) {
   if (stage >= STAGES.length - 1) return '全量'
   if (META_ALL.includes(name)) return 'meta'
@@ -207,6 +209,18 @@ export function markerFor(name, stage) {
   if (idx < 0) return '交付后'
   if (idx <= stage + 2) return '可调' // v1.6 预放两档 = 已可调："预解锁" 与 "可调" 无行为差 → 单语义
   return '交付后'
+}
+
+/** 运行时真绑定标记（v1.9）：registry.view(scope).visible 是 SDK 生成的唯一事实源——
+ *  visible.has(name) = run_code 的 tools[name] 一定存在；否则一律"交付后"，绝不谎报。 */
+export function runtimeMark(toolsSvc, scope, name) {
+  try {
+    if (typeof toolsSvc?.view !== 'function') return markerFor(name, 0)
+    const visible = toolsSvc.view(scope).visible
+    if (typeof visible?.has !== 'function') return markerFor(name, 0)
+    if (META_ALL.includes(name)) return visible.has(name) ? 'meta' : '交付后'
+    return visible.has(name) ? '可调' : '交付后'
+  } catch { return markerFor(name, 0) }
 }
 
 /** 参数名速览（一行）：catalog 行内嵌——消灭"猜参数名"摩擦（glob 的 pattern / read 的 file_path / todo_write 的 content 各不相同）。 */
@@ -362,9 +376,10 @@ export function pageFail(message) {
 }
 
 /** 页面验证执行体（headless Chrome + 新鲜 profile + screenshot + DOM smoke；硬超时杀树）。
- *  ctx 只需 subprocess 服务（ctx.get('subprocess')）。返回 lossless-JSON 概览，所有分支形状统一。 */
+ *  ctx 只需 subprocess 服务（ctx.get('subprocess')）。返回 lossless-JSON 概览，所有分支形状统一。
+ *  v1.9：包装层——js 模式直通；浏览器路径一次失败（超时/空 DOM）自动重试一次（双倍虚拟时间 +
+ *  1.5×超时、全新 profile），吸附 3D/WebGL 首加载偶发（六轮实弹"路径级不可复现"的根因修复）。 */
 export async function pageCheckRun(ctx, args) {
-  // v1.7：js-only 模式——不启动浏览器，直接本地 vm 执行（语法检查 + 纯逻辑单测）
   if (args?.js !== undefined && args?.js !== null && String(args.js).trim() !== '') {
     const r = runSandboxJs(String(args.js))
     return {
@@ -373,6 +388,20 @@ export async function pageCheckRun(ctx, args) {
       jsOutput: r.output, jsError: r.error,
     }
   }
+  const first = await pageCheckRunOnce(ctx, args)
+  if (first.ok) return first
+  // 仅"可重试型"失败才重试：硬错误（无浏览器/无 subprocess/参数错/无法建 profile）带 settleError 且未超时 → 不重试
+  if (first.settleError && !first.timedOut) return first
+  const boost = {
+    ...args,
+    virtualTimeMs: Math.min(60000, Math.floor(Number(args?.virtualTimeMs || 8000) * 2)),
+    timeoutMs: Math.min(240000, Math.round(Number(args?.timeoutMs || 20000) * 1.5)),
+  }
+  return await pageCheckRunOnce(ctx, boost)
+}
+
+/** 单次执行体（无重试语义；参数与 pageCheckRun 相同）。 */
+async function pageCheckRunOnce(ctx, args) {
   const chrome = pageRunnerPath()
   if (!chrome) return pageFail('no headless browser found (Chrome/Edge); set DSH_PAGE_RUNNER')
   const url = normalizePageUrl(args?.url)
@@ -402,6 +431,7 @@ export async function pageCheckRun(ctx, args) {
         '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
         '--disable-dev-shm-usage', '--user-data-dir=' + profile,
         '--enable-logging=stderr',
+        '--enable-unsafe-swiftshader', '--disable-application-cache',
         '--screenshot=' + shot,
         '--window-size=' + width + ',' + height,
         '--force-device-scale-factor=' + String(scale),
@@ -662,14 +692,15 @@ export function apply(ctx, config) {
   function toolIndex() {
     const session = currentSession()
     const stage = session === undefined ? 0 : (ensureStage()[session.id]?.stage ?? 0)
-    return registryFullIndex(ctx.tools, currentAgent()).map((t) => ({
-      name: t.name, desc: t.description, mark: markerFor(t.name, stage), parameters: t.parameters,
+    const scope = currentAgent()
+    return registryFullIndex(ctx.tools, scope).map((t) => ({
+      name: t.name, desc: t.description, mark: runtimeMark(ctx.tools, scope, t.name), parameters: t.parameters,
     })).filter((t) => t.name)
   }
 
   registerTool({
     name: 'phase_begin',
-    description: '确认开启本次会话：开始渐进式工具解锁（注入机制声明 + 解锁阶段 0 工具 + 切换 Code Mode）。调用即开始。',
+    description: '确认开启本次会话：开始渐进式工具解锁（注入机制声明 + 解锁阶段 0 工具 + 切换 Code Mode）。调用即开始。Code Mode 契约：run_code 程序必须以 lossless JSON 结束——async 时 await 每个工具调用（Promise 直接 return 会 invalid-output）；edit 报 invalid-output 失败时先 grep 确认文件——编辑可能实际已生效（假失败），勿盲目重试。',
     parameters: {},
     output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: String(v) }] },
     async execute() {
@@ -824,7 +855,7 @@ export function apply(ctx, config) {
 
   registerTool({
     name: 'dev_page_check',
-    description: '页面/JS 验证三合一：① url 模式 = headless Chrome 截图 + DOM smoke（console/pageerror 经 --enable-logging=stderr 提取；title 字段；selector 文本；scale 放大；无 profile 互斥锁 + 硬超时杀树）；② js 模式 = 本地 vm 执行任意 JS（语法检查 + 纯逻辑单测，零外部 node 依赖）。url 支持 http(s)://、file://、裸路径（中文自动编码）。产物 .dsh-shots/page-*.png。',
+    description: '页面/JS 验证三合一：① url 模式 = headless Chrome 截图 + DOM smoke（console/pageerror 提取；title/selector/scale；WebGL 页已开软件渲染 --enable-unsafe-swiftshader——3D 页不再假超时；失败自动重试一次（双倍虚拟时间+全新 profile）——结果可复现）；② js 模式 = 本地 vm 执行任意 JS（语法 + 纯逻辑单测）。url 支持 http(s)://、file://、裸路径（中文自动编码）。产物 .dsh-shots/page-*.png。',
     parameters: {
       url: { type: 'string', description: '页面地址（js 模式时省略）' },
       js: { type: 'string', description: 'JS 源码：语法检查 + 纯逻辑执行（不启动浏览器）' },
@@ -909,7 +940,7 @@ export function apply(ctx, config) {
         const rows = allSchemas().map((s) => ({
           name: s.name || s.function?.name,
           desc: (s.description || s.function?.description || ''),
-          mark: markerFor(s.name || s.function?.name || '', stageOf()),
+          mark: runtimeMark(toolsSvc, agent, s.name || s.function?.name || ''),
           parameters: s.parameters || s.function?.parameters || {},
         })).filter((t) => t.name).sort((a, b) => a.name.localeCompare(b.name))
         return rows.filter((t) => (!q || (t.name + ' ' + t.desc).toLowerCase().includes(q)) && (!d || dom(t.name, t.desc) === d)).map((t) => '- ' + t.name + ' [' + t.mark + '] — ' + t.desc.split(/\n|\. /)[0].slice(0, 90) + ' (' + paramHint(t.parameters) + ')').join('\n') || '（无匹配工具）'
@@ -927,7 +958,7 @@ export function apply(ctx, config) {
         const params = s.parameters || s.function?.parameters || {}
         const props = params.properties || {}
         const required = params.required || []
-        const lines = ['工具: ' + wanted + ' [' + markerFor(wanted, stageOf()) + ']', '描述: ' + (s.description || s.function?.description || '')]
+        const lines = ['工具: ' + wanted + ' [' + runtimeMark(toolsSvc, agent, wanted) + ']', '描述: ' + (s.description || s.function?.description || '')]
         for (const [k, v] of Object.entries(props)) lines.push('  ' + k + ': ' + (v.type || 'any') + (required.includes(k) ? '（必需）' : '') + ' — ' + (v.description || ''))
         return lines.join('\n')
       },
@@ -977,7 +1008,7 @@ export function apply(ctx, config) {
 
     n += make({
       name: 'dev_page_check',
-      description: '页面/JS 验证（own-layer shim）：url 模式 = 截图 + DOM smoke + console/pageerror + title + selector + scale；js 模式 = 本地 vm 语法检查/纯逻辑执行（不启动浏览器）。',
+      description: '页面/JS 验证（own-layer shim）：url 模式 = 截图 + DOM smoke + console/pageerror + title + selector + scale（WebGL 软件渲染已开，失败自动重试一次）；js 模式 = 本地 vm 语法检查/纯逻辑执行。',
       parameters: {
         url: { type: 'string', description: 'http(s):// / file:// / 裸路径（自动编码）' },
         js: { type: 'string', description: 'JS 源码（js 模式，不启动浏览器）' },

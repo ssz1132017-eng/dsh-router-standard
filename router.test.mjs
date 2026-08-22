@@ -6,7 +6,7 @@ import {
   classifyTask, personaFor, coreFor, bandFor, testinessFor, parseMode, applyPersona,
   isFlashModel, extractText, sessionMode,
 } from './preset/router-standard/router-core.mjs'
-import { autoAdvance, filterToolGuidance, markerFor, paramHint, pageCheckRun, pageRunnerPath, normalizePageUrl, pageFail, runSandboxJs, stripDomNoise, extractTitle, extractSelectorText, extractConsoleLines } from './preset/router-standard/router-bootstrap.mjs'
+import { autoAdvance, filterToolGuidance, markerFor, runtimeMark, paramHint, pageCheckRun, pageRunnerPath, normalizePageUrl, pageFail, runSandboxJs, stripDomNoise, extractTitle, extractSelectorText, extractConsoleLines } from './preset/router-standard/router-bootstrap.mjs'
 
 test('react: greenfield/build tasks map to react band', () => {
   assert.equal(bandFor(classifyTask('需要本地开发一个马里奥网页小游戏，参考经典原版')), 'react')
@@ -184,6 +184,15 @@ test('filterToolGuidance: keeps only visible-tier tool guidance before delivery 
   assert.ok(filterToolGuidance([{ name: 'tool:unknown-thing', text: 'x' }], 0, full).length === 1)
 })
 
+test('runtimeMark: 以运行时可见面为准（v1.9 根修——目录标注=SDK 真绑定）', () => {
+  const fakeVisible = (names) => ({ view: () => ({ visible: new Map(names.map((n) => [n, {}])) }) })
+  const svc = fakeVisible(['read', 'write', 'pwsh'])
+  assert.equal(runtimeMark(svc, {}, 'read'), '可调')
+  assert.equal(runtimeMark(svc, {}, 'pwsh'), '可调')
+  assert.equal(runtimeMark(svc, {}, 'read_image'), '交付后') // 不在可见面 → 不谎报
+  assert.equal(runtimeMark(fakeVisible(['tools_catalog']), {}, 'tools_catalog'), 'meta')
+  assert.equal(runtimeMark(fakeVisible([]), {}, 'tools_catalog'), '交付后')
+})
 test('markerFor: 可调/交付后/meta/全量 semantics (v1.7 单语义化——预放≠不可调)', () => {
   assert.equal(markerFor('read', 0), '可调')
   assert.equal(markerFor('todo_write', 0), '可调')
