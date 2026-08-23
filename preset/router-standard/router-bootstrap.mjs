@@ -600,7 +600,7 @@ export async function deliveryCheck(ctx, args) {
   } else if (requireSmoke) {
     checks.push({ name: 'headless-smoke', pass: false, detail: 'smoke required for delivery — pass url (page deliverable); set requireSmoke: false only for non-page artifacts (scripts/docs)' })
   }
-  /* 证据门禁（router-lab 契约——v1.14 规范化：schema 写清进工具描述，不再让模型读源码）：
+  /* 证据门禁（正式交付契约——v1.14 规范化：schema 写清进工具描述，不再让模型读源码）：
    * evidence.items[] 每项: { label, kind ∈ file|page|image|run|test|text, target?（file/page/image/test 必填路径）,
    *   result?（run/text 必填文本）, reviewed?: true（page/image 视觉类必须人工复核过）}
    * 页面交付物额外要求：至少一项 reviewed 的视觉证据。 */
