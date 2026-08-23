@@ -185,7 +185,7 @@ test('standard preset: after the first tool/call the router keeps the full surfa
   assert.equal(assembled.sections.length, SECTIONS.length + 3, 'official sections + router-stage/decl/pressure (v1.3)')
   assert.ok(assembled.sections.some((s) => s.name === 'router-stage'), 'stage state stays visible after promotion')
   assert.ok(assembled.sections.some((s) => s.name === 'router-decl'), 'progressive declaration persists after promotion')
-  assert.ok(assembled.sections.some((s) => s.name === 'router-pressure'), 'pressure guide persists after promotion')
+  assert.ok(assembled.sections.some((s) => s.name === 'router-proactivity'), 'pressure guide persists after promotion')
   assert.deepEqual(assembled.contexts, [])
   assert.ok(assembled.tools.length === TOOLS.length, 'full tool catalog exposed')
   assert.match(assembled.sections.find((s) => s.name === 'persona').text, /^You are a helpful software engineer assistant\.$/)

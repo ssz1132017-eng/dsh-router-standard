@@ -191,16 +191,16 @@ test('runtimeMark: 以运行时可见面为准（v1.9 根修——目录标注=S
   const svc = fakeVisible(['read', 'write', 'pwsh'])
   assert.equal(runtimeMark(svc, {}, 'read'), '可调')
   assert.equal(runtimeMark(svc, {}, 'pwsh'), '可调')
-  assert.equal(runtimeMark(svc, {}, 'read_image'), '交付后') // 不在可见面 → 不谎报
+  assert.equal(runtimeMark(svc, {}, 'read_image'), '未解锁') // 不在可见面 → 不谎报
   assert.equal(runtimeMark(fakeVisible(['tools_catalog']), {}, 'tools_catalog'), 'meta')
-  assert.equal(runtimeMark(fakeVisible([]), {}, 'tools_catalog'), '交付后')
+  assert.equal(runtimeMark(fakeVisible([]), {}, 'tools_catalog'), '未解锁')
 })
 test('markerFor: 可调/交付后/meta/全量 semantics (v1.7 单语义化——预放≠不可调)', () => {
   assert.equal(markerFor('read', 0), '可调')
   assert.equal(markerFor('todo_write', 0), '可调')
   assert.equal(markerFor('write', 0), '可调') // stage+2 预放 = 可调（无行为差 → 单标记）
   assert.equal(markerFor('tools_catalog', 0), 'meta')
-  assert.equal(markerFor('subagent', 0), '交付后')
+  assert.equal(markerFor('subagent', 0), '未解锁')
   assert.equal(markerFor('read', 3), '全量')
 })
 
@@ -332,24 +332,31 @@ test('pageCheckRun: URL 校验 + fake subprocess smoke (v1.5 → v1.6.1 全分�
   assertPageShape(r)
   assert.equal(typeof pageRunnerPath(), 'string')
 })
-test('deliveryCheck: 交付 gate 检查清单（v1.11）', async () => {
+test('deliveryCheck: 交付 gate 检查清单（v1.11 → v1.14 requireSmoke+evidence）', async () => {
   // 缺失路径 → FAIL + 证据
   const nofile = await deliveryCheck({ get: () => undefined }, { file: 'Z:\\\\no-such-file-xyz.html' })
   assert.equal(nofile.ok, false)
   assert.ok(nofile.checks.some((c) => c.name === 'file-exists' && !c.pass))
-  // 临时有效文件 → 存在/非空/UTF-8 全 PASS（无 url 时不跑 smoke）
+  // 临时有效文件：无 url + 无 evidence → smoke/evidence FAIL（v1.14 不再可绕过）
   const tmp = join(process.cwd(), '.t-delivery-probe.html')
   writeFileSync(tmp, '<!doctype html><html><head><title>OK</title></head><body>x</body></html>', 'utf8')
   try {
-    const okr = await deliveryCheck({ get: () => undefined }, { file: tmp })
+    const noSmoke = await deliveryCheck({ get: () => undefined }, { file: tmp })
+    assert.equal(noSmoke.ok, false)
+    assert.ok(noSmoke.checks.some((c) => c.name === 'headless-smoke' && !c.pass), 'smoke required default')
+    assert.ok(noSmoke.checks.some((c) => c.name === 'delivery-evidence' && !c.pass), 'evidence required')
+    // 非页面产物显式关 smoke + 给 evidence → PASS
+    const okr = await deliveryCheck({ get: () => undefined }, {
+      file: tmp, requireSmoke: false,
+      evidence: { items: [{ label: 'file', kind: 'file', target: tmp }] },
+    })
     assert.equal(okr.ok, true)
-    assert.ok(okr.checks.every((c) => c.pass))
   } finally { rmSync(tmp, { force: true }) }
   // 非法 UTF-8 → encoding FAIL
   const bad = join(process.cwd(), '.t-bad.html')
   writeFileSync(bad, Buffer.from([0xff, 0xfe, 0x00, 0x41]), 'utf8')
   try {
-    const badr = await deliveryCheck({ get: () => undefined }, { file: bad })
+    const badr = await deliveryCheck({ get: () => undefined }, { file: bad, requireSmoke: false, evidence: { items: [{ label: 'f', kind: 'file', target: bad }] } })
     assert.equal(badr.ok, false)
     assert.ok(badr.checks.some((c) => c.name === 'encoding-utf8' && !c.pass))
   } finally { rmSync(bad, { force: true }) }
@@ -359,6 +366,6 @@ test('runtimeCallable: 与 SDK 绑定同源（v1.11）', () => {
   const svc = { view: () => ({ visible: new Map([['read', {}], ['write', {}], ['run_code', {}], ['subagent', {}]]) }) }
   const names = runtimeCallable(svc, {})
   assert.ok(names.includes('read') && names.includes('write'))
-  assert.ok(!names.includes('run_code'))
-  assert.ok(!names.includes('subagent'), '非阶段/非 meta 不列入 callable')
+  assert.ok(names.includes('run_code'), 'both 模式下 run_code 真实可调')
+  assert.ok(names.includes('subagent'), 'v1.14 全列：scope-local 也可调工具必列')
 })
