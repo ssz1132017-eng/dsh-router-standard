@@ -302,6 +302,23 @@ test('v0.9: read-only next-tier tool does not advance the phase; mutating does',
   assert.equal(disk.sessions[session.id].stage, 2, 'mutating editor advances to development')
 })
 
+test('v1.17.1: legacy stage>0 + guided:false — phase_begin repairs flag, no duplicate phase-0 bootstrap', async () => {
+  const file = tmpStageFile()
+  writeFileSync(file, JSON.stringify({ version: 2, sessions: { 'legacy-session': { stage: 3, guided: false } } }))
+  process.env.DSH_ROUTER_STAGE_FILE = file
+  const h = makeHarness(applyStandard, {})
+  const session = { id: 'legacy-session', header: {}, events: [] }
+  const appends = []
+  const agent = makeStageAgent(session, appends)
+  h.agentRef.current = agent
+  const begin = h.registeredTools.find((t) => t.name === 'phase_begin')
+  const r = await begin.execute()
+  assert.match(r, /already started \(legacy state\)/)
+  assert.equal(appends.length, 0, 'no bootstrap injected for legacy started session')
+  const disk = JSON.parse(readFileSync(file, 'utf8'))
+  assert.equal(disk.sessions['legacy-session'].guided, true, 'guided flag repaired')
+})
+
 test('v0.9: resume keeps the phase and never re-injects the bootstrap guide', async () => {
   const file = tmpStageFile()
   writeFileSync(file, JSON.stringify({ version: 2, sessions: { 'resume-session': { stage: 2, guided: true } } }))

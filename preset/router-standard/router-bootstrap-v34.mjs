@@ -957,6 +957,13 @@ export function apply(ctx, config) {
       if (existing.guided === true) {
         return 'session already started: phase ' + existing.stage + ' (' + STAGES[existing.stage].name + '); no duplicate bootstrap'
       }
+      // v1.17.1 跨代兼容：guided 缺失（旧记录）但阶段 > 0 的会话视为已开启——
+      // 只补标记、不重复注入 Bootstrap（此前漏判 → stage=3 会话收到"阶段 0"引导，用户 #2 矛盾根源）
+      if (existing.stage > 0) {
+        existing.guided = true
+        saveStageState()
+        return 'session already started (legacy state): phase ' + existing.stage + ' (' + STAGES[existing.stage].name + '); guided flag repaired, no duplicate bootstrap'
+      }
       existing.guided = true
       saveStageState()
       applyStageRestrict(currentAgent(), 0)
@@ -965,7 +972,7 @@ export function apply(ctx, config) {
         const toolsSvc = currentAgent()?.ctx?.get('tools')
         if (toolsSvc && typeof toolsSvc.presentAs === 'function') toolsSvc.presentAs('native') // v1.15 定案：wire = restrict 过滤后的可见工具（注入面+调用面同时阶段化，SDK 段归零——39K 注意力税消失），且所有工具直接可调（无折叠）。both 的双注入态（wire 全量 + SDK 全量）已废弃
       } catch { /* already declared */ }
-      const guide = START_GUIDE + '\n\n' + PROGRESSIVE_DECL + '\n\n' + PRESSURE_GUIDE + '\n\n' + stageText(0, [], memoryMuted(session))
+      const guide = START_GUIDE + '\n\n' + PROGRESSIVE_DECL + '\n\n' + PRESSURE_GUIDE + '\n\n' + stageText(existing.stage, [], memoryMuted(session))
       try {
         currentAgent()?.inbox.append('next-step', {
           id: 'bootstrap-' + Date.now(),
@@ -974,7 +981,7 @@ export function apply(ctx, config) {
           content: [{ type: 'text', text: guide }],
         })
       } catch { /* skip */ }
-      return 'session started: phase 0 (了解/对齐) unlocked — read/glob/grep/web_search/ask_user_question + engram memory; next tier pre-unlocked. Bootstrap injected.'
+      return 'session started: phase ' + existing.stage + ' (' + STAGES[existing.stage].name + ') unlocked — Bootstrap injected.'
     },
   })
 
