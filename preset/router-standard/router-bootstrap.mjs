@@ -22,6 +22,7 @@ import { join, dirname } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs'
+import { pressureStatsFor } from './pressure-sensor.mjs'
 import vm from 'node:vm'
 
 export const name = 'router-bootstrap'
@@ -52,10 +53,10 @@ const DESC = {
 }
 const PROGRESSIVE_DECL =
   'We hold a full tool registry (see tools_catalog for the live count), revealed in phases. tools_catalog lists every tool (name + summary + [phase mark] + param names); tools_help <name> returns any tool\'s complete spec. We query on demand and call precisely. '
-  + 'Inside run_code the meta tools are bound at phase_begin: tools_catalog/tools_help (secondary disclosure), phase_advance/dev_router_status/dev_router_mode (level-up & self-check), dev_reload_preset_live (live reload), dev_page_check (headless screenshot + DOM smoke). '
+  + 'Meta tools are always callable: tools_catalog/tools_help (secondary disclosure), phase_advance/dev_router_status/dev_router_mode (level-up & self-check), dev_reload_preset_live (live reload), dev_page_check (page verification + local JS engine), delivery_check (delivery gate). '
   + 'Long-running goals carry goal tools: get_goal / create_goal / update_goal (read before updating, mark complete only when actually achieved). '
   + 'Tool signatures are NOT uniform: before the first use of any tool this session, read its parameter names via tools_catalog or tools_help (or the SDK type inside run_code) — never guess. Runtime caps (read lines, search count, output bytes) are enforced at call time — check tools_help before big calls. '
-  + 'Tools are directly callable (both mode: native + run_code): call write/edit/read/pwsh directly, or batch steps inside run_code as tools[\'name\'](args). Zero-arg tools still take {}: tools[\'dev_router_status\']({}). '
+  + 'Tools are directly callable (native mode — no wrapping, no run_code needed): call write/edit/read/pwsh directly; only the current phase\'s tools are injected (full schema never flooded). Zero-arg tools still take {}: tools[\'dev_router_status\']({}). '
   + 'write/edit bindings return the FULL before/after text — take only path/operation, never print a whole write/edit result (context explosion); inspect the changed lines with grep/read instead. Page verification is built in: dev_page_check(url) → headless Chrome, fresh profile, screenshot + DOM snippet.'
   + ' Proactivity protocol: act on reversible next steps; ask only for user-owned choices; report actions with evidence.'
 const PRESSURE_GUIDE =
@@ -65,8 +66,8 @@ const START_GUIDE =
   + 'Unlock order: understanding (read/glob/grep/web_search/ask_user_question) → planning (todo_write) → development (write/edit/str_replace_editor) → verification (pwsh/read_image/jobs). '
   + 'This guide appears only once; after this, no phase messages are injected. '
   + 'Current phase + unlocked tools are always visible in the system prompt (router-stage section) and via dev_router_status. '
-  + 'Meta tools are available immediately inside run_code: tools_catalog (index), tools_help (full schema), phase_advance (level up), dev_router_status/dev_router_mode (self-check & override), dev_page_check (page verification). '
-  + 'Tools are directly callable from now on (both mode) — or batch multiple steps inside a run_code program as tools[\'name\']({...}). A direct call always works; run_code is optional for efficiency. '
+  + 'Meta tools are always available: tools_catalog (index), tools_help (full schema), phase_advance (level up), dev_router_status/dev_router_mode (self-check & override), dev_page_check (page verification), delivery_check (delivery gate). '
+  + 'Tools are directly callable from now on (native mode) — only this phase\'s tools are on the wire; the full registry is revealed phase by phase. '
   + 'You route yourself: to advance, use a next-tier tool (it is pre-unlocked), call phase_advance, or state that the current phase is done.'
 
 const STAGES = [
@@ -102,7 +103,7 @@ const META_ALL = [...META_LIVE, ...META_GOAL]
 const STAGE_GUIDES = [
   'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond) + pre-unlocked write/edit (two tiers ahead — calling one jumps straight there). Ground first: recall, verify claims, then read/ask. Design or build intent already unlocks development tools — no routing ceremony needed. Runtime caps (read lines, output bytes) are enforced at call time — check tools_help before big calls. Complete when: the task requirements and available evidence are stated clearly. Then work (write is already unlocked). Stage-tool note: bash/pwsh/read_image belong to the verification stage — they show [未解锁] at stage 0, become [可调] from stage 1 (pre-unlocked two tiers) and [全量] at stage 3; this is not "after delivery".',
   'Phase: planning. Unlocked: todo_write/exit_plan_mode + memory review (engram_search/open) + pre-unlocked write/edit/pwsh. Lock the plan, then work — calling a pre-unlocked tool jumps to its phase; phase_advance advances one stage (never skips). Complete when: the plan is recorded and decisions are locked. Then develop.',
-  'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link) + pre-unlocked verification tools. Re-read before re-edit: a file changed since your last read must be read again first (editor enforces a fresh read). write/edit results carry the FULL before/after text — take only path/operation and inspect changed lines with grep/read; never print a whole write/edit result. Cross-language escaping: run_code programs are JS — PowerShell "${env:V}" is template-interpolated by JS; build such strings with single quotes or concatenation first. Complete when: the artifact exists and passes its own self-check (loads, no console errors, key values sane). Then phase_advance to verification.',
+  'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link) + pre-unlocked verification tools. Re-read before re-edit: a file changed since your last read must be read again first (editor enforces a fresh read). write/edit results carry the FULL before/after text — take only path/operation and inspect changed lines with grep/read; never print a whole write/edit result. Cross-language escaping: run_code programs are JS — PowerShell "${env:V}" is template-interpolated by JS; build such strings with single quotes or concatenation first. Complete when: the artifact exists and passes its own self-check (loads, no console errors, key values sane). Visual checks: read_image is already callable (pre-unlocked) — after dev_page_check, read the screenshot directly. Then phase_advance to verification.',
   'Phase: verification → delivery gate. Unlocked: pwsh/bash/read_image/jobs + dev_page_check + delivery_check (meta). Shell: Windows: bash = Git Bash (MSYS, GNU) — first-class shell (pwsh remains for PowerShell-native needs); POSIX: bash. Git Bash needs full access to start (MSYS cannot run under a restricted token) — if it fails at workspace-write, do the documented one-shot escalation, never bypass the sandbox. Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first. **Evidence gate: delivery_check requires an evidence manifest appropriate to the artifact** — text/code: read or grep assertions, or dev_page_check({js}) unit tests (kind=text/test); commands: real stdout summary (kind=run); pages/3D/images: dev_page_check multi-view screenshots + read_image review each (kind=page/image, reviewed:true; view count is up to the task — 3D usually iso/front/side/top, simple pages 1-2 views). Delivery PASS requires evidence on top of file/UTF-8/headless checks: missing evidence, missing targets, unreviewed visuals, or empty run results → FAIL. ⚠️ Switching shells (pwsh→bash) is NOT a sandbox escalation: if a command is policy-denied, escalate that exact command once via sandbox_permissions — never switch shells to sidestep. **Complete only when: delivery_check(file, url, evidence) returns PASS** — until then, do NOT report the task as delivered; any FAIL: fix and re-run. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
 ]
 
@@ -115,12 +116,43 @@ function stageSummary(stage) {
   const nextAfter = stage + 2 < STAGES.length ? STAGES[stage + 2].tools : []
   return { name: STAGES[stage].name, stage, unlocked, nextTier, nextAfter }
 }
-function stageText(stage) {
+/** 用户显式禁用（v1.15 建议 #4——还原不是控制：用户说"不用记忆"就不再引导）。
+ *  检测会话用户消息中的记忆禁用意图；命中后阶段指引不再提 recall/verify/engram。 */
+export function memoryMuted(session) {
+  try {
+    const events = session?.events || []
+    const re = /不用记忆|勿用记忆|禁用记忆|记忆系统.*(不用|不要|禁用)|不要用记忆|no memory|without memory/i
+    for (const e of events) {
+      if (e.type !== 'user/message') continue
+      if (re.test(extractText(e.data))) return true
+    }
+    return false
+  } catch { return false }
+}
+
+/** 单一事实源（v1.15 建议 #2）：阶段文本只有一份正交真相——
+ *  非交付：Callable now = 运行时可见面（runtimeCallable），其余全部锁定（无矛盾句）；
+ *  交付：full catalog open（restrict 已释放），无 Locked 句。列表与 dev_router_status 同源。 */
+function stageText(stage, runtimeList, muted) {
   const s = stageSummary(stage)
-  const delivery = stage >= STAGES.length - 1 ? '\nDelivery: restrict released — full catalog open (all registered tools).\nDelivery evidence gate: provide an evidence manifest (kind by artifact). Visual/3D tasks: capture views + read_image review; no fixed view count.' : ''
-  return 'Current phase: ' + s.name + ' (' + s.stage + '/3). Callable now: ' + s.unlocked.join(', ')
-    + (delivery || '\nLocked (not in current/pre-unlocked window): every other registered tool stays locked — e.g. bash belongs to the verification stage (pre-unlocked from stage 1, fully open at stage 3); it is not "after delivery" only. Until the delivery phase passes delivery_check, do NOT declare the task delivered. Delivery is the gate, not a progress label.')
-    + '\nStage guide: ' + (STAGE_GUIDES[stage] || '')
+  const callable = runtimeList && runtimeList.length ? runtimeList : s.unlocked
+  let guide = STAGE_GUIDES[stage] || ''
+  if (muted) {
+    guide = guide
+      .replace(/ \+ memory \(engram_recall\/verify\/respond\)/, ' (memory disabled by user)')
+      .replace(/ \+ memory review \(engram_search\/open\)/, ' (memory disabled by user)')
+      .replace(/ \+ memory write \(engram_store\/link\)/, ' (memory disabled by user)')
+      .replace(/Ground first: recall, verify claims, then read\/ask for the rest\./, 'Ground first: read/ask for the rest (memory disabled by user).')
+  }
+  if (stage >= STAGES.length - 1) {
+    return 'Current phase: ' + s.name + ' (' + s.stage + '/3). Delivery: restrict released — full catalog open: ' + callable.join(', ')
+      + '\nDelivery evidence gate: provide an evidence manifest (kind by artifact). Visual/3D tasks: capture views + read_image review; no fixed view count.'
+      + '\nStage guide: ' + guide
+      + '\nUntil delivery_check passes, do NOT declare the task delivered. Delivery is the gate, not a progress label.'
+  }
+  return 'Current phase: ' + s.name + ' (' + s.stage + '/3). Callable now: ' + callable.join(', ')
+    + '\nNot yet callable (until delivery): every tool NOT in the Callable-now list stays locked — that is the single truth; no other lock text exists.'
+    + '\nStage guide: ' + guide
     + '\nPhase is self-routed state: calling a pre-unlocked tool jumps the phase to that tool\'s stage; phase_advance (meta) advances one stage; or state that our phase is done.'
 }
 
@@ -443,10 +475,14 @@ export async function pageCheckRun(ctx, args) {
   try {
     const first = await pageCheckRunOnce(ctx, args)
     if (first.ok) return first
-    // 仅"可重试型"失败才重试（显式 retry:true）：硬错误带 settleError 且未超时 → 不重试
-    if (args?.retry !== true || (first.settleError && !first.timedOut)) return first
+    // v1.15：自动重试默认开启（建议 #3——重页首载偶发）；重试=双倍虚拟时间 + 降分辨率（1024×640，防 CPU 双爆）。
+    // 仅"可重试型"失败才重试：硬错误带 settleError 且未超时 → 不重试（显式 retry:false 可关）。
+    if (args?.retry === false || (first.settleError && !first.timedOut)) return first
     const boost = {
       ...args,
+      width: Math.min(1024, Number(args?.width || 1280)),
+      height: 640,
+      scale: 1,
       virtualTimeMs: Math.min(60000, Math.floor(Number(args?.virtualTimeMs || 8000) * 2)),
       timeoutMs: Math.min(240000, Math.round(Number(args?.timeoutMs || 20000) * 1.5)),
     }
@@ -808,7 +844,7 @@ export function apply(ctx, config) {
     const sections = filterToolGuidance((assembled.sections || []).map((s) =>
       /persona/i.test(s.name) ? { ...s, text: RL_PERSONA } : s
     ), stage, fullNames)
-    sections.push({ name: 'router-stage', order: 1, text: stageText(stage) })
+    sections.push({ name: 'router-stage', order: 1, text: stageText(stage, runtimeCallable(toolsSvc, agent), memoryMuted(session)) })
     // 声明与泄压常驻（人设常驻：不经压缩丢失；bootstrap 消息可能被 compaction 剪掉）
     sections.push({ name: 'router-decl', order: 2, text: PROGRESSIVE_DECL })
     sections.push({ name: 'router-proactivity', order: 3, text: PRESSURE_GUIDE.replace(/^\n+/, '') })
@@ -885,9 +921,9 @@ export function apply(ctx, config) {
       try { installMetaShim(currentAgent(), { installStage: false, stage: 0 }) } catch { /* ignore */ }
       try {
         const toolsSvc = currentAgent()?.ctx?.get('tools')
-        if (toolsSvc && typeof toolsSvc.presentAs === 'function') toolsSvc.presentAs('both') // v1.13 机制根治：native 直调 + run_code 并存——write/edit 直接可调，不再 unknown tool
+        if (toolsSvc && typeof toolsSvc.presentAs === 'function') toolsSvc.presentAs('native') // v1.15 定案：wire = restrict 过滤后的可见工具（注入面+调用面同时阶段化，SDK 段归零——39K 注意力税消失），且所有工具直接可调（无折叠）。both 的双注入态（wire 全量 + SDK 全量）已废弃
       } catch { /* already declared */ }
-      const guide = START_GUIDE + '\n\n' + PROGRESSIVE_DECL + '\n\n' + PRESSURE_GUIDE + '\n\n' + stageText(0)
+      const guide = START_GUIDE + '\n\n' + PROGRESSIVE_DECL + '\n\n' + PRESSURE_GUIDE + '\n\n' + stageText(0, [], memoryMuted(session))
       try {
         currentAgent()?.inbox.append('next-step', {
           id: 'bootstrap-' + Date.now(),
@@ -999,6 +1035,7 @@ export function apply(ctx, config) {
         'preset=' + (ctx.get('agentPresets')?.composedPreset?.(agent?.ctx) ?? 'unknown'),
         'goalTools=get_goal/create_goal/update_goal',
         'pageCheckLock=' + (() => { const b = globalThis[PAGE_BUSY_KEY]; return b && b.v ? ('busy since ' + new Date(b.at).toISOString() + ' (owner ' + (b.owner || '?') + ')') : 'free' })(),
+        'pressure=' + (() => { try { return pressureStatsFor(sid) } catch { return 'n/a' } })(),
         ...(stage >= STAGES.length - 1 ? ['fullCatalog=restrict released (all tools open)'] : []),
       ].join('\n')
     },
@@ -1033,7 +1070,7 @@ export function apply(ctx, config) {
       virtualTimeMs: { type: 'number', description: '虚拟时间预算（默认 8000；动画页可加大）' },
       domChars: { type: 'number', description: 'DOM 片段截取字符数（默认 8000，剥离 style/script 后；上限 30000）' },
       selector: { type: 'string', description: '#id / .class / tagname：提取该元素文本（用于绕过截断读取数值）' },
-      retry: { type: 'boolean', description: '首次失败（超时/空 DOM）时重试一次（双倍虚拟时间+1.5×超时）。默认 false——避免 3D 页软渲染双重满载 CPU' },
+      retry: { type: 'boolean', description: '失败自动重试一次（默认 true：降分辨率 1024×640 + 双倍虚拟时间 + 1.5×超时——吸附 3D/WebGL 首载偶发且不爆 CPU）；retry: false 关闭' },
     },
     output: { schema: {
       type: 'object',
@@ -1068,7 +1105,7 @@ export function apply(ctx, config) {
       requireSmoke: { type: 'boolean', description: '默认 true：页面产物必须跑 headless smoke（避免"省略 url 即绕过"）。非页面产物传 false' },
       timeoutMs: { type: 'number', description: 'smoke 硬超时毫秒（默认 20000）' },
       virtualTimeMs: { type: 'number', description: 'smoke 虚拟时间预算（默认 8000）' },
-      retry: { type: 'boolean', description: 'smoke 失败时重试一次（默认 false）' },
+      retry: { type: 'boolean', description: 'smoke 失败时自动重试一次（默认 true，降分辨率+双倍虚拟时间）' },
       evidence: { type: 'object', description: '通用证据清单。结构（唯一权威）：{ items: [{ label, kind ∈ file|page|image|run|test|text, target?（file/page/image/test 必填路径）, result?（run/text 必填文本）, reviewed?: true（page/image 视觉类必须人工复核过） }] }。页面交付物要求至少一项 reviewed:true 的视觉证据；为空则 delivery-evidence 判 FAIL。', properties: {
         items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
           kind: { type: 'string', enum: ['file','page','image','run','test','text'] },
@@ -1166,7 +1203,7 @@ export function apply(ctx, config) {
         const sum = stageSummary(stageOf())
         const mode = overrideMap().get(sid) ?? sessionMode(agent?.session)
         const cur = stageOf()
-        return 'router=standard (own-layer shim, ' + ROUTER_VERSION + ')\nphase=' + sum.name + ' (' + sum.stage + '/3)\ncallable(runtime)=' + runtimeCallable(agent.ctx?.get?.('tools'), agent).join(', ') + '\npresentation=' + readPresentation(agent) + '\nmode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')\npersona=' + RL_PERSONA + '\noverride=' + (overrideMap().has(sid) ? String(overrideMap().get(sid)) : 'auto') + '\npreset=' + (ctx.get('agentPresets')?.composedPreset?.(agent.ctx) ?? 'unknown') + '\npageCheckLock=' + (() => { const b = globalThis[PAGE_BUSY_KEY]; return b && b.v ? ('busy since ' + new Date(b.at).toISOString() + ' (owner ' + (b.owner || '?') + ')') : 'free' })() + '\ngoalTools=get_goal/create_goal/update_goal' + (cur >= STAGES.length - 1 ? '\nfullCatalog=restrict released (all tools open)' : '')
+        return 'router=standard (own-layer shim, ' + ROUTER_VERSION + ')\nphase=' + sum.name + ' (' + sum.stage + '/3)\ncallable(runtime)=' + runtimeCallable(agent.ctx?.get?.('tools'), agent).join(', ') + '\npresentation=' + readPresentation(agent) + '\nmode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')\npersona=' + RL_PERSONA + '\noverride=' + (overrideMap().has(sid) ? String(overrideMap().get(sid)) : 'auto') + '\npreset=' + (ctx.get('agentPresets')?.composedPreset?.(agent.ctx) ?? 'unknown') + '\npageCheckLock=' + (() => { const b = globalThis[PAGE_BUSY_KEY]; return b && b.v ? ('busy since ' + new Date(b.at).toISOString() + ' (owner ' + (b.owner || '?') + ')') : 'free' })() + '\npressure=' + (() => { try { return pressureStatsFor(sid) } catch { return 'n/a' } })() + '\ngoalTools=get_goal/create_goal/update_goal' + (cur >= STAGES.length - 1 ? '\nfullCatalog=restrict released (all tools open)' : '')
       },
     })
 
