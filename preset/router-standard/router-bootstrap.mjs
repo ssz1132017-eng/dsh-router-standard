@@ -104,7 +104,7 @@ const STAGE_GUIDES = [
   'Phase: understanding. Unlocked: read/glob/grep/web_search/ask_user_question + memory (engram_recall/verify/respond) + pre-unlocked write/edit (two tiers ahead — calling one jumps straight there). Ground first: recall, verify claims, then read/ask. Design or build intent already unlocks development tools — no routing ceremony needed. Runtime caps (read lines, output bytes) are enforced at call time — check tools_help before big calls. Complete when: the task requirements and available evidence are stated clearly. Then work (write is already unlocked). Stage-tool note: bash/pwsh/read_image belong to the verification stage — they show [未解锁] at stage 0, become [可调] from stage 1 (pre-unlocked two tiers) and [全量] at stage 3; this is not "after delivery".',
   'Phase: planning. Unlocked: todo_write/exit_plan_mode + memory review (engram_search/open) + pre-unlocked write/edit/pwsh. Lock the plan, then work — calling a pre-unlocked tool jumps to its phase; phase_advance advances one stage (never skips). Complete when: the plan is recorded and decisions are locked. Then develop.',
   'Phase: development. Unlocked: write/edit/str_replace_editor + memory write (engram_store/link) + pre-unlocked verification tools. Re-read before re-edit: a file changed since your last read must be read again first (editor enforces a fresh read). write/edit results carry the FULL before/after text — take only path/operation and inspect changed lines with grep/read; never print a whole write/edit result. Cross-language escaping: run_code programs are JS — PowerShell "${env:V}" is template-interpolated by JS; build such strings with single quotes or concatenation first. Complete when: the artifact exists and passes its own self-check (loads, no console errors, key values sane). Visual checks: read_image is already callable (pre-unlocked) — after dev_page_check, read the screenshot directly. Then phase_advance to verification.',
-  'Phase: verification → delivery gate. Unlocked: pwsh/bash/read_image/jobs + dev_page_check + delivery_check (meta). Shell: Windows: bash = Git Bash (MSYS, GNU) — first-class shell (pwsh remains for PowerShell-native needs); POSIX: bash. Git Bash needs full access to start (MSYS cannot run under a restricted token) — if it fails at workspace-write, do the documented one-shot escalation, never bypass the sandbox. Page verification: dev_page_check(url) — screenshot + DOM smoke + console/pageerror (title/selector/scale options); dev_page_check({js: "..."}) runs a local JS engine (syntax check + pure-logic unit tests, no browser, no node dependency). Compare screenshots via read_image one at a time, or stitch a contact sheet with pwsh first. **Evidence gate: delivery_check requires an evidence manifest appropriate to the artifact** — text/code: read or grep assertions, or dev_page_check({js}) unit tests (kind=text/test); commands: real stdout summary (kind=run); pages/3D/images: dev_page_check multi-view screenshots + read_image review each (kind=page/image, reviewed:true; view count is up to the task — 3D usually iso/front/side/top, simple pages 1-2 views). Delivery PASS requires evidence on top of file/UTF-8/headless checks: missing evidence, missing targets, unreviewed visuals, or empty run results → FAIL. ⚠️ Switching shells (pwsh→bash) is NOT a sandbox escalation: if a command is policy-denied, escalate that exact command once via sandbox_permissions — never switch shells to sidestep. **Complete only when: delivery_check(file, url, evidence) returns PASS** — until then, do NOT report the task as delivered; any FAIL: fix and re-run. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
+  'Phase: verification → delivery gate. Unlocked: pwsh/bash/read_image/jobs + dev_page_check + delivery_check (meta). Shell: Windows: bash = Git Bash (MSYS, GNU) — first-class shell (pwsh remains for PowerShell-native needs); POSIX: bash. Git Bash needs full access to start (MSYS cannot run under a restricted token) — if it fails at workspace-write, do the documented one-shot escalation, never bypass the sandbox. Page verification (official-standard path): pwsh/bash + external validator — Playwright CLI (`python -m playwright screenshot ...`; set PLAYWRIGHT_BROWSERS_PATH to C:\\Users\\Eldwen\\AppData\\Local\\ms-playwright if the npx shim fails) — then read_image each screenshot (kind=page/image/external, reviewed:true). dev_page_check is an OPTIONAL convenience (its own diagnostic lists next steps when it fails; lite:true for heavy pages; js: for pure-logic checks). **Evidence gate: delivery_check requires a manifest** — text/code: read/grep assertions or dev_page_check({js}) (kind=text/test); commands: real stdout summary (kind=run); pages/3D/images: external validator screenshots + read_image review each (kind=page/image/external, reviewed:true — 3D usually iso/front/side/top). Delivery PASS requires evidence on top of file/UTF-8/headless checks; missing evidence, missing targets, unreviewed visuals, or empty run results → FAIL. ⚠️ Switching shells (pwsh→bash) is NOT a sandbox escalation: escalate the exact policy-denied command once via sandbox_permissions — never switch shells to sidestep. **Complete only when: delivery_check(file, url|external evidence) returns PASS** — until then, do NOT report the task as delivered; any FAIL: fix and re-run. If the sandbox denies an in-place verify, escalate the exact command once, never work around it.',
 ]
 
 /** 阶段文本（we-form——you-form 是 let me 吸引子）。
@@ -116,6 +116,12 @@ function stageSummary(stage) {
   const nextAfter = stage + 2 < STAGES.length ? STAGES[stage + 2].tools : []
   return { name: STAGES[stage].name, stage, unlocked, nextTier, nextAfter }
 }
+/** 记忆工具判定（v1.16：#4 用户禁用记忆 → 调用面+注入面双双剔除，不是只改引导句）。 */
+export function isMemoryTool(name) { return /^engram_/.test(String(name || '')) }
+export function muteAwareList(names, muted) {
+  return muted ? (names || []).filter((n) => !isMemoryTool(n)) : names
+}
+
 /** 用户显式禁用（v1.15 建议 #4——还原不是控制：用户说"不用记忆"就不再引导）。
  *  检测会话用户消息中的记忆禁用意图；命中后阶段指引不再提 recall/verify/engram。 */
 export function memoryMuted(session) {
@@ -420,9 +426,10 @@ function safeStringify(v) {
   try { return JSON.stringify(v) ?? String(v) } catch { return String(v) }
 }
 
-/** URL 归一化（v1.6：裸路径/中文路径自动转 file:// URL——用户实弹：中文工作区路径必须手工
- *  百分号编码，内置工具应替模型做）。支持 http(s)://、file://、绝对盘符路径、相对路径。 */
-export function normalizePageUrl(raw) {
+/** URL 归一化（v1.6：中文路径自动 file://；v1.16：相对路径的"根"= 会话工作区——AI 实测
+ *  相对路径被解析到 DSH 进程 cwd（Administrator）导致 ERR_FILE_NOT_FOUND）。
+ *  支持 http(s)://、file://、绝对盘符路径、相对路径（base = 调用方 session cwd）。 */
+export function normalizePageUrl(raw, baseDir) {
   const u = String(raw || '').trim()
   if (/^https?:\/\//i.test(u)) return u
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return u // 其他 scheme 原样 → pageCheckRun 校验会拒绝
@@ -430,7 +437,8 @@ export function normalizePageUrl(raw) {
     try { return new URL(u).href } catch { return u }
   }
   const abs = /^[a-zA-Z]:[\\/]/.test(u) || u.startsWith('/')
-  try { return pathToFileURL(abs ? u : join(process.cwd(), u)).href } catch { return u }
+  const root = baseDir || process.cwd()
+  try { return pathToFileURL(abs ? u : join(root, u)).href } catch { return u }
 }
 
 /** 统一失败结果（v1.6.1 修复：此前失败分支返回 {ok:false,error} 缺 schema 的字段且 error
@@ -513,15 +521,16 @@ function forceTreeKill(ctx, pid) {
 async function pageCheckRunOnce(ctx, args) {
   const chrome = pageRunnerPath()
   if (!chrome) return pageFail('no headless browser found (Chrome/Edge); set DSH_PAGE_RUNNER')
-  const url = normalizePageUrl(args?.url)
+  const url = normalizePageUrl(args?.url, (() => { try { return ctx?.get?.('agent')?.session?.header?.cwd || process.cwd() } catch { return process.cwd() } })())
   if (!/^(https?|file):/i.test(url)) return pageFail('url must be http(s):// / file:// / a path (auto-encoded)')
-  // 180s 上限：3DGS/WebGL 页在 SwiftShader 下渲染一帧可达 1 分钟级（用户实弹：gargantua 的
-  // ?shot= 模式自驱动帧循环，重页面需足够预算；超时是硬杀树，不会像裸 Chrome 那样 600s 挂死）
-  const timeoutMs = Math.min(180000, Math.max(1000, Math.floor(Number(args?.timeoutMs || 20000))))
-  const width = Math.min(4096, Math.max(320, Math.floor(Number(args?.width || 1280))))
-  const height = Math.min(4096, Math.max(240, Math.floor(Number(args?.height || 800))))
+  // v1.16 轻量单帧模式（AI 反馈 #2：重页默认资源可控——960×640 + 固定 12s 虚拟时间，
+  // 失败不二次降级；用户实测软件渲染 50s/100% CPU 的画面用 lite 可进 ~15s）
+  const lite = args?.lite === true
+  const timeoutMs = Math.min(180000, Math.max(1000, Math.floor(Number(args?.timeoutMs || (lite ? 30000 : 20000)))))
+  const width = Math.min(4096, Math.max(320, Math.floor(Number(args?.width || (lite ? 960 : 1280)))))
+  const height = Math.min(4096, Math.max(240, Math.floor(Number(args?.height || (lite ? 640 : 800)))))
   const domChars = Math.min(30000, Math.max(500, Math.floor(Number(args?.domChars || 8000))))
-  const scale = Math.min(4, Math.max(1, Math.floor(Number(args?.scale || 1))))
+  const scale = Math.min(4, Math.max(1, Math.floor(Number(args?.scale || (lite ? 1 : 1)))))
   const cssSel = String(args?.selector || '').trim()
   // v1.14：截图写入"会话工作区"（模型可读）而非 DSH 进程 cwd——此前落在 Administrator 用户目录，
   // read_image 报 not found；session.header.cwd 是模型真实工作区。
@@ -590,13 +599,32 @@ async function pageCheckRunOnce(ctx, args) {
   const exitCode = Number(outcome?.exitCode ?? outcome?.code ?? -1)
   const ok = !settleError && !timedOut && exitCode === 0 && domText.length > 0
   return {
-    ok, exitCode: Number.isFinite(exitCode) ? exitCode : -1, timedOut, settleError: settleError || '',
+    ok, exitCode: Number.isFinite(exitCode) ? exitCode : -1, timedOut,
+    // v1.16 失败诊断（#11：失败不静默——给原因 + 候选路径）
+    settleError: settleError || (!ok ? diagnosePageFail({ timedOut, exitCode, domText, errTail, shot, lite }) : ''),
     shot, domText, stderrTail: errTail,
     title: extractTitle(rawDom),
     consoleTail,
     selectorText,
     jsOutput: '', jsError: '',
   }
+}
+
+/** v1.16 失败诊断文案：原因 + 下一步（不再"FAIL 无产物"——AI 反馈 #11）。 */
+function diagnosePageFail(f) {
+  const causes = []
+  if (f.timedOut) causes.push('TIMEOUT (hard kill)')
+  else if (f.exitCode === 0 && f.domText.length === 0) causes.push('exit 0 but empty DOM (page may not have loaded JS / --dump-dom raced)')
+  else causes.push('exit=' + f.exitCode)
+  if (!f.shot || !existsSync(f.shot)) causes.push('no screenshot artifact')
+  else causes.push('screenshot at ' + f.shot)
+  const stderr = String(f.errTail || '').replace(/\s+/g, ' ').slice(0, 200)
+  let advice = 'Next steps: '
+  advice += f.lite ? '' : '1) lite:true (960x640 single-frame, ~15s); '
+  advice += '2) check the path (relative resolves to the session workspace); '
+  advice += '3) external validator (python -m playwright screenshot ...) + read_image — deliver with evidence kind=external; '
+  advice += '4) timeoutMs/virtualTimeMs bigger for heavy WebGL.'
+  return causes.join('; ') + (stderr ? ' | stderr: ' + stderr : '') + ' | ' + advice
 }
 
 /** 交付 gate（v1.11——用户实弹：缺"交付 gate 工具"，模型把"功能做完"当"完成交付"）：
@@ -644,7 +672,10 @@ export async function deliveryCheck(ctx, args) {
   if (!ev || !Array.isArray(ev.items) || ev.items.length === 0) {
     checks.push({ name: 'delivery-evidence', pass: false, detail: 'missing evidence items — provide at least one evidence item: {label, kind, target?, result?, reviewed?} (see tools_help for the exact shape)' })
   } else {
-    const ALLOWED = new Set(['file', 'page', 'image', 'run', 'test', 'text'])
+    // v1.16 外部验证器一等公民（AI 反馈 #9：门禁验结果不锁工具）——
+    // external = 外部验证器（Playwright/playwright-cli/自产报告）产物：target（截图/报告文件）
+    // 或 result（命令输出摘要）任一存在即合法；页面交付物仍需 ≥1 项 reviewed 视觉证据（page/image/external 皆可）。
+    const ALLOWED = new Set(['file', 'page', 'image', 'run', 'test', 'text', 'external'])
     const failures = []
     for (const it of ev.items) {
       const label = String(it?.label || '').trim()
@@ -653,6 +684,18 @@ export async function deliveryCheck(ctx, args) {
       if (!ALLOWED.has(kind)) { failures.push('bad kind: ' + kind); continue }
       if (kind === 'run' || kind === 'text') {
         if (!String(it?.result || '').trim()) failures.push(kind + ' evidence without result')
+        continue
+      }
+      if (kind === 'external') {
+        const hasTarget = String(it?.target || '').trim() !== ''
+        const hasResult = String(it?.result || '').trim() !== ''
+        if (!hasTarget && !hasResult) failures.push('external evidence needs target (file) or result (output summary)')
+        if (hasTarget) {
+          try {
+            const st = statSync(String(it.target))
+            if (!st.isFile() || st.size <= 0) failures.push('external target not valid file: ' + st)
+          } catch { failures.push('external target missing: ' + it.target) }
+        }
         continue
       }
       const t = String(it?.target || '').trim()
@@ -664,8 +707,8 @@ export async function deliveryCheck(ctx, args) {
       if ((kind === 'page' || kind === 'image') && it?.reviewed !== true) failures.push('visual not reviewed: ' + label)
     }
     if (args?.url) {
-      const hasReviewedVisual = (ev.items || []).some(it => (String(it?.kind) === 'page' || String(it?.kind) === 'image') && it?.reviewed === true)
-      if (!hasReviewedVisual) failures.push('page deliverable needs at least one reviewed visual evidence')
+      const hasReviewedVisual = (ev.items || []).some(it => (['page', 'image', 'external'].includes(String(it?.kind))) && it?.reviewed === true)
+      if (!hasReviewedVisual) failures.push('page deliverable needs at least one reviewed visual evidence (page/image/external)')
     }
     checks.push({ name: 'delivery-evidence', pass: failures.length === 0, detail: failures.length === 0 ? 'evidence accepted (' + ev.items.length + ' item(s))' : failures.join('; ') })
   }
@@ -771,7 +814,7 @@ function applyStageRestrict(agent, stage) {
       // 命名的工具会导致 restrict() 抛 unknown，从而放弃整个阶段门控；双过滤保证门控始终成立。
       let known = null
       try { if (typeof toolsSvc.view === 'function') known = new Set(toolsSvc.view(agent).restrictableNames) } catch { /* fall through */ }
-      const allow = [...allowed].filter((t) => GLOBAL_SAFE.includes(t) && (known === null || known.has(t)))
+      const allow = [...allowed].filter((t) => GLOBAL_SAFE.includes(t) && (known === null || known.has(t)) && !(memoryMuted(agent.session) && isMemoryTool(t)))
       if (allow.length === 0) return
       const disposer = toolsSvc.restrict({ allow })
       if (sid && disposer) sharedLift.set(sid, disposer)
@@ -844,7 +887,7 @@ export function apply(ctx, config) {
     const sections = filterToolGuidance((assembled.sections || []).map((s) =>
       /persona/i.test(s.name) ? { ...s, text: RL_PERSONA } : s
     ), stage, fullNames)
-    sections.push({ name: 'router-stage', order: 1, text: stageText(stage, runtimeCallable(toolsSvc, agent), memoryMuted(session)) })
+    sections.push({ name: 'router-stage', order: 1, text: stageText(stage, muteAwareList(runtimeCallable(toolsSvc, agent), memoryMuted(session)), memoryMuted(session)) })
     // 声明与泄压常驻（人设常驻：不经压缩丢失；bootstrap 消息可能被 compaction 剪掉）
     sections.push({ name: 'router-decl', order: 2, text: PROGRESSIVE_DECL })
     sections.push({ name: 'router-proactivity', order: 3, text: PRESSURE_GUIDE.replace(/^\n+/, '') })
@@ -1071,6 +1114,7 @@ export function apply(ctx, config) {
       domChars: { type: 'number', description: 'DOM 片段截取字符数（默认 8000，剥离 style/script 后；上限 30000）' },
       selector: { type: 'string', description: '#id / .class / tagname：提取该元素文本（用于绕过截断读取数值）' },
       retry: { type: 'boolean', description: '失败自动重试一次（默认 true：降分辨率 1024×640 + 双倍虚拟时间 + 1.5×超时——吸附 3D/WebGL 首载偶发且不爆 CPU）；retry: false 关闭' },
+      lite: { type: 'boolean', description: '轻量单帧模式：960×640 + 默认 12s 虚拟时间（重页省 CPU，约 15s 内完成）；失败不二次降级' },
     },
     output: { schema: {
       type: 'object',
@@ -1203,7 +1247,7 @@ export function apply(ctx, config) {
         const sum = stageSummary(stageOf())
         const mode = overrideMap().get(sid) ?? sessionMode(agent?.session)
         const cur = stageOf()
-        return 'router=standard (own-layer shim, ' + ROUTER_VERSION + ')\nphase=' + sum.name + ' (' + sum.stage + '/3)\ncallable(runtime)=' + runtimeCallable(agent.ctx?.get?.('tools'), agent).join(', ') + '\npresentation=' + readPresentation(agent) + '\nmode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')\npersona=' + RL_PERSONA + '\noverride=' + (overrideMap().has(sid) ? String(overrideMap().get(sid)) : 'auto') + '\npreset=' + (ctx.get('agentPresets')?.composedPreset?.(agent.ctx) ?? 'unknown') + '\npageCheckLock=' + (() => { const b = globalThis[PAGE_BUSY_KEY]; return b && b.v ? ('busy since ' + new Date(b.at).toISOString() + ' (owner ' + (b.owner || '?') + ')') : 'free' })() + '\npressure=' + (() => { try { return pressureStatsFor(sid) } catch { return 'n/a' } })() + '\ngoalTools=get_goal/create_goal/update_goal' + (cur >= STAGES.length - 1 ? '\nfullCatalog=restrict released (all tools open)' : '')
+        return 'router=standard (own-layer shim, ' + ROUTER_VERSION + ')\nphase=' + sum.name + ' (' + sum.stage + '/3)\ncallable(runtime)=' + muteAwareList(runtimeCallable(agent.ctx?.get?.('tools'), agent), memoryMuted(agent?.session)).join(', ') + '\npresentation=' + readPresentation(agent) + '\nmode=' + fmtMode(mode) + ' (band=' + bandFor(mode) + ')\npersona=' + RL_PERSONA + '\noverride=' + (overrideMap().has(sid) ? String(overrideMap().get(sid)) : 'auto') + '\npreset=' + (ctx.get('agentPresets')?.composedPreset?.(agent.ctx) ?? 'unknown') + '\npageCheckLock=' + (() => { const b = globalThis[PAGE_BUSY_KEY]; return b && b.v ? ('busy since ' + new Date(b.at).toISOString() + ' (owner ' + (b.owner || '?') + ')') : 'free' })() + '\npressure=' + (() => { try { return pressureStatsFor(sid) } catch { return 'n/a' } })() + '\ngoalTools=get_goal/create_goal/update_goal' + (cur >= STAGES.length - 1 ? '\nfullCatalog=restrict released (all tools open)' : '')
       },
     })
 
@@ -1244,6 +1288,7 @@ export function apply(ctx, config) {
         url: { type: 'string', description: 'http(s):// / file:// / 裸路径（自动编码）' },
         js: { type: 'string', description: 'JS 源码（js 模式，不启动浏览器）' },
         timeoutMs: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' },
+        lite: { type: 'boolean', description: '轻量单帧（960×640 + 12s）' },
         scale: { type: 'number' }, virtualTimeMs: { type: 'number' }, domChars: { type: 'number' },
         selector: { type: 'string', description: '#id / .class / tagname 提取文本' },
         retry: { type: 'boolean', description: '失败重试一次（默认 false）' },

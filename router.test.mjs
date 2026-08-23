@@ -8,7 +8,7 @@ import {
   classifyTask, personaFor, coreFor, bandFor, testinessFor, parseMode, applyPersona,
   isFlashModel, extractText, sessionMode,
 } from './preset/router-standard/router-core.mjs'
-import { autoAdvance, filterToolGuidance, markerFor, runtimeMark, runtimeCallable, deliveryCheck, paramHint, pageCheckRun, pageRunnerPath, normalizePageUrl, pageFail, runSandboxJs, stripDomNoise, extractTitle, extractSelectorText, extractConsoleLines } from './preset/router-standard/router-bootstrap.mjs'
+import { autoAdvance, filterToolGuidance, markerFor, runtimeMark, runtimeCallable, deliveryCheck, paramHint, pageCheckRun, pageRunnerPath, normalizePageUrl, pageFail, runSandboxJs, stripDomNoise, extractTitle, extractSelectorText, extractConsoleLines, isMemoryTool, muteAwareList } from './preset/router-standard/router-bootstrap.mjs'
 
 test('react: greenfield/build tasks map to react band', () => {
   assert.equal(bandFor(classifyTask('需要本地开发一个马里奥网页小游戏，参考经典原版')), 'react')
@@ -368,4 +368,21 @@ test('runtimeCallable: 与 SDK 绑定同源（v1.11）', () => {
   assert.ok(names.includes('read') && names.includes('write'))
   assert.ok(names.includes('run_code'), 'both 模式下 run_code 真实可调')
   assert.ok(names.includes('subagent'), 'v1.14 全列：scope-local 也可调工具必列')
+})
+test('v1.16: muteAwareList/isMemoryTool + external evidence', async () => {
+  assert.ok(isMemoryTool('engram_recall'))
+  assert.ok(!isMemoryTool('read'))
+  const all = ['read', 'write', 'engram_recall', 'tool-help']
+  assert.deepEqual(muteAwareList(all, true), ['read', 'write', 'tool-help'])
+  assert.deepEqual(muteAwareList(all, false), all)
+  // external 证据：Playwright 产物合法（target 文件 + reviewed）
+  const tmp = join(process.cwd(), '.t-ext-evidence.png')
+  writeFileSync(tmp, 'x', 'utf8')
+  try {
+    const okr = await deliveryCheck({ get: () => undefined }, {
+      file: tmp, requireSmoke: false,
+      evidence: { items: [{ label: 'pw-screenshot', kind: 'external', target: tmp, reviewed: true }] },
+    })
+    assert.equal(okr.ok, true)
+  } finally { rmSync(tmp, { force: true }) }
 })

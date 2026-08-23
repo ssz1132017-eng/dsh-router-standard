@@ -44,7 +44,7 @@ export function apply(ctx, config = {}) {
   ctx.on('session/event', (session, event) => {
     const sid = session?.id
     if (!sid) return
-    const st = state.get(sid) ?? { stepChars: 0, loopHits: 0, noToolSteps: 0, lastGuideAt: 0, stepNo: 0 }
+    const st = state.get(sid) ?? { stepChars: 0, loopHits: 0, noToolSteps: 0, lastGuideAt: 0, stepNo: 0, lastTool: '', sameStreak: 0 }
     state.set(sid, st)
     if (event?.type === 'assistant/chunk') {
       const chunk = event.data?.chunk
@@ -55,6 +55,10 @@ export function apply(ctx, config = {}) {
       }
     } else if (event?.type === 'tool/call' || event?.type === 'tool/code-dispatch') {
       st.noToolSteps = 0
+      // v1.16 无进展循环检测（#5：重复截图/反复调参有工具调用但无进展——失联语义覆盖不到）
+      const nm = String(event?.data?.name || event?.data?.toolName || '').trim()
+      if (nm && nm === st.lastTool) st.sameStreak += 1
+      else { st.lastTool = nm; st.sameStreak = nm ? 1 : 0 }
     }
   })
 
@@ -82,6 +86,8 @@ export function apply(ctx, config = {}) {
       if (st.stepChars > charsPerStep * scale) triggers.push(`deep-reasoning ${st.stepChars} chars`)
       if (st.loopHits >= Math.max(2, Math.round(loopHits * scale))) triggers.push(`loop-pattern x${st.loopHits}`)
     }
+    // v1.16 无进展循环：同一工具连续 ≥4 次调用（有行动但没进展——重复截图/反复调参）
+    if (st.sameStreak >= 4 && st.lastTool) triggers.push(`same tool x${st.sameStreak} in a row (${st.lastTool}) — no-progress loop detected`)
 
     st.stepNo += 1
     const cooled = st.stepNo - st.lastGuideAt >= 3
