@@ -1,5 +1,5 @@
 /**
- * router-bootstrap (standard v1.14.0): progressive tool disclosure — game-style timeline.
+ * router-bootstrap (standard v1.15.0): progressive tool disclosure — game-style timeline.
  *
  * 时序（用户定稿）：
  *   T0 首轮 = 纯 RL 句（46 字符）+ phase_begin（唯一确认工具，native；稳定 we）
@@ -41,7 +41,7 @@ function toJsonSchema(spec) {
 }
 
 const RL_PERSONA = 'You are a helpful software engineer assistant.'
-const ROUTER_VERSION = 'v1.14.0'
+const ROUTER_VERSION = 'v1.15.0'
 /* 描述单源（v1.13 审计修复）：main 注册与 own-layer shim 读同一份，杜绝双份漂移。 */
 const DESC = {
   toolsCatalog: '渐进式披露一级：全部工具（名称 + 一行摘要 + 阶段标记）。query 关键词过滤；domain 域浏览。',
@@ -57,8 +57,9 @@ const PROGRESSIVE_DECL =
   + 'Tool signatures are NOT uniform: before the first use of any tool this session, read its parameter names via tools_catalog or tools_help (or the SDK type inside run_code) — never guess. Runtime caps (read lines, search count, output bytes) are enforced at call time — check tools_help before big calls. '
   + 'Tools are directly callable (both mode: native + run_code): call write/edit/read/pwsh directly, or batch steps inside run_code as tools[\'name\'](args). Zero-arg tools still take {}: tools[\'dev_router_status\']({}). '
   + 'write/edit bindings return the FULL before/after text — take only path/operation, never print a whole write/edit result (context explosion); inspect the changed lines with grep/read instead. Page verification is built in: dev_page_check(url) → headless Chrome, fresh profile, screenshot + DOM snippet.'
+  + ' Proactivity protocol: act on reversible next steps; ask only for user-owned choices; report actions with evidence.'
 const PRESSURE_GUIDE =
-  '\n\nPressure valve (MAXential): for deep reasoning we do not loop "but wait" — we pour it into the valve: think a step, revise an earlier step, branch + merge an alternative, and complete when truly settled. Depth is our call: a small result gets a small thought, a consequential fork gets full reasoning. Triggers: two or more dependent steps, asked the same thing twice, or caught restating a decision / reaching for "actually / but wait".'
+  '\n\nProactivity (replaces the pressure valve): every turn, before awaiting the user, scan for the next actionable item — unfinished work, unverified claims, reversible improvements, unfixed warnings. Choose one and act; report what you did and why. Ask only when the choice belongs to the user (preference, budget, irreversible/destructive, external approval). Two or more dependent steps: think step by step, but do not stop to ask permission for reversible work. Depth is our call: a small result gets a small thought, a consequential fork gets full reasoning.'
 const START_GUIDE =
   '\n\nBootstrap (once per session): this is a progressive tool-unlock session — tools open in phases like a leveling game. Call phase_begin to confirm start (unlock phase-0 tools + Code Mode).'
   + 'Unlock order: understanding (read/glob/grep/web_search/ask_user_question) → planning (todo_write) → development (write/edit/str_replace_editor) → verification (pwsh/read_image/jobs). '
@@ -788,7 +789,7 @@ export function apply(ctx, config) {
     sections.push({ name: 'router-stage', order: 1, text: stageText(stage) })
     // 声明与泄压常驻（人设常驻：不经压缩丢失；bootstrap 消息可能被 compaction 剪掉）
     sections.push({ name: 'router-decl', order: 2, text: PROGRESSIVE_DECL })
-    sections.push({ name: 'router-pressure', order: 3, text: PRESSURE_GUIDE.replace(/^\n+/, '') })
+    sections.push({ name: 'router-proactivity', order: 3, text: PRESSURE_GUIDE.replace(/^\n+/, '') })
     if (!shimmedSessions.has(session.id)) {
       try { installMetaShim(agent, { installStage: true, stage }); shimmedSessions.add(session.id) } catch { /* ignore */ }
     }

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.10.0 — 泄压插件移除 + 主动性自检（用户指令）
+
+- **pressure-sensor 插件移除**（用户：不需要了）——`agent.cordis.yml` 删除 pressure-sensor 行；`pressure-sensor.mjs` 三处（分支/生产/源仓库）删除；事件通道/自适应阈值代码不再装配。
+- **泄压引导 → 主动性自检**：常驻引导文本改为 Proactivity 自检（每轮先扫“可推进项”，可逆动作直接做并报告，只有用户偏好/不可逆/外部权限才问）；持久化段 `router-pressure` → `router-proactivity`。
+- **主动性协议入声明**：`PROGRESSIVE_DECL` 增加 “act on reversible next steps; ask only for user-owned choices; report actions with evidence”。
+- 版本 v1.15.0；selftest 同步（移除 sensor 断言，新增 no-pressure-plugin / proactivity-persist-section / proactivity-guide），lab+prod SELFTEST PASS。
+- 实测：dev_router_status v1.15.0；`tools_catalog` 阶段0 bash=`[未解锁]`、阶段3=`[可调]`；run_code 元数据恢复。
+
 ## v1.9.0 — 自优化审计修复（v1.13/v1.14，用户实测驱动）
 
 - **P1: bash invalid output** — `gitbash-executor` 缺少 `signal` → `canonicalBashResult` 输出 `signal: undefined` → run_code lossless-JSON 拒绝（`tool "bash" returned invalid output: value is not lossless JSON`）。执行器补 `signal: outcome?.signal ?? null`；本机/生产/源仓库已同步。
